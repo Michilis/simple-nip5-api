@@ -1,0 +1,1 @@
+# Routes package for NIP-05 API 
