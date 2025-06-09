@@ -14,6 +14,10 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     last_synced_at = Column(DateTime, nullable=True)  # Track Nostr profile sync
     
+    # Subscription management
+    expires_at = Column(DateTime, nullable=True)  # When subscription expires
+    subscription_type = Column(String, nullable=True)  # yearly, lifetime
+    
     # Relationship to invoices
     invoices = relationship("Invoice", back_populates="user")
 
@@ -28,6 +32,7 @@ class Invoice(Base):
     username = Column(String, nullable=False)
     pubkey = Column(String, nullable=False)
     npub = Column(String, nullable=False)
+    subscription_type = Column(String, nullable=False)  # yearly, lifetime
     
     # Polling metadata
     poll_attempts = Column(Integer, default=0)

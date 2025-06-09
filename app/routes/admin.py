@@ -27,6 +27,41 @@ def verify_admin_key(x_api_key: str = Header(..., description="Admin API key for
         )
     return x_api_key
 
+def find_user_by_identifier(db: Session, identifier: str) -> Optional[User]:
+    """Find user by username, npub, or pubkey"""
+    
+    # First try to normalize as username
+    try:
+        normalized_username = normalize_username(identifier)
+        user = db.query(User).filter(User.username == normalized_username).first()
+        if user:
+            return user
+    except ValueError:
+        pass  # Not a valid username format
+    
+    # Try as npub
+    if identifier.startswith('npub1') and validate_npub(identifier):
+        try:
+            pubkey = npub_to_pubkey(identifier)
+            user = db.query(User).filter(User.pubkey == pubkey).first()
+            if user:
+                return user
+        except:
+            pass
+    
+    # Try as hex pubkey (64 character hex string)
+    if len(identifier) == 64:
+        try:
+            # Validate it's a hex string
+            int(identifier, 16)
+            user = db.query(User).filter(User.pubkey == identifier).first()
+            if user:
+                return user
+        except ValueError:
+            pass
+    
+    return None
+
 @router.post(
     "/add", 
     response_model=StatusResponse,
@@ -124,7 +159,9 @@ async def add_user(
             username=username,
             pubkey=pubkey,
             npub=request.npub,
-            is_active=True
+            is_active=True,
+            subscription_type="lifetime",  # Manually added users get lifetime subscription
+            expires_at=None  # Lifetime never expires
         )
         
         db.add(new_user)
@@ -243,6 +280,8 @@ async def remove_user(
     - **pubkey**: Hex format public key
     - **npub**: Bech32 format public key
     - **is_active**: Whether user appears in nostr.json
+    - **subscription_type**: Subscription type
+    - **expires_at**: Subscription expiration date
     - **created_at**: User creation timestamp
     """,
     responses={
@@ -282,6 +321,8 @@ async def list_users(
                 pubkey=user.pubkey,
                 npub=user.npub,
                 is_active=user.is_active,
+                subscription_type=user.subscription_type,
+                expires_at=user.expires_at,
                 created_at=user.created_at
             )
             for user in users
@@ -302,7 +343,13 @@ async def list_users(
     
     **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
     
-    Useful for:
+    ### User Identifier
+    The `{username}` parameter can be any of:
+    - **Username**: e.g., `alice` 
+    - **npub**: e.g., `npub1abc123...`
+    - **Pubkey**: 64-character hex string, e.g., `abc123def456...`
+    
+    ### Use Cases:
     - Re-enabling previously deactivated users
     - Manually activating users added with is_active=false
     """,
@@ -329,9 +376,7 @@ async def activate_user(
     """Activate a user"""
     
     try:
-        username = normalize_username(username)
-        
-        user = db.query(User).filter(User.username == username).first()
+        user = find_user_by_identifier(db, username)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -343,7 +388,7 @@ async def activate_user(
         
         return StatusResponse(
             status="success",
-            message=f"User {username} activated successfully"
+            message=f"User {user.username} activated successfully"
         )
         
     except HTTPException:
@@ -364,11 +409,17 @@ async def activate_user(
     
     **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
     
+    ### User Identifier
+    The `{username}` parameter can be any of:
+    - **Username**: e.g., `alice` 
+    - **npub**: e.g., `npub1abc123...`
+    - **Pubkey**: 64-character hex string, e.g., `abc123def456...`
+    
     ### Difference from Remove:
     - **Deactivate**: User stays in database but doesn't appear in nostr.json
     - **Remove**: User is completely deleted from database
     
-    Useful for:
+    ### Use Cases:
     - Temporarily suspending users
     - Keeping user records while disabling service
     """,
@@ -395,9 +446,7 @@ async def deactivate_user(
     """Deactivate a user"""
     
     try:
-        username = normalize_username(username)
-        
-        user = db.query(User).filter(User.username == username).first()
+        user = find_user_by_identifier(db, username)
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -409,7 +458,7 @@ async def deactivate_user(
         
         return StatusResponse(
             status="success",
-            message=f"User {username} deactivated successfully"
+            message=f"User {user.username} deactivated successfully"
         )
         
     except HTTPException:

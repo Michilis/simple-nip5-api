@@ -198,4 +198,19 @@ class NostrSyncService:
         return users
 
 # Global service instance
-nostr_sync_service = NostrSyncService() 
+nostr_sync_service = NostrSyncService()
+
+async def sync_username(users_to_sync: List[User]) -> None:
+    """Sync usernames for a list of users (background task function)"""
+    from app.database import SessionLocal
+    
+    db = SessionLocal()
+    try:
+        for user in users_to_sync:
+            try:
+                await nostr_sync_service.sync_user_profile(user, db)
+            except Exception as e:
+                logger.error(f"Failed to sync user {user.username}: {str(e)}")
+                continue
+    finally:
+        db.close() 

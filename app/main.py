@@ -175,7 +175,7 @@ async def api_documentation():
     )
 
 # Health check endpoint
-@app.get("/", tags=["health"], summary="Basic health check")
+@app.get("/", tags=["health"], summary="Basic health check", include_in_schema=False)
 async def root():
     """
     Basic health check endpoint

@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, List
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
@@ -16,7 +16,7 @@ class Settings:
     
     # NIP-05 pricing (in satoshis)
     NIP05_YEARLY_PRICE_SATS: int = int(os.getenv("NIP05_YEARLY_PRICE_SATS", "1000"))
-    NIP05_LIFETIME_PRICE_SATS: int = int(os.getenv("NIP05_LIFETIME_PRICE_SATS", "10000"))
+    NIP05_LIFETIME_PRICE_SATS: int = int(os.getenv("NIP05_LIFETIME_PRICE_SATS", "5000"))
     
     # Invoice settings
     INVOICE_EXPIRY_SECONDS: int = int(os.getenv("INVOICE_EXPIRY_SECONDS", "1800"))  # 30 minutes
@@ -25,7 +25,7 @@ class Settings:
     DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./nip05.db")
     
     # Domain configuration
-    DOMAIN: str = os.getenv("DOMAIN", "localhost")
+    DOMAIN: str = os.getenv("DOMAIN", "nip05.yourdomain.com")
     
     # Webhook URL for LNbits callbacks
     WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "http://localhost:8000/api/public/webhook/paid")
@@ -41,6 +41,12 @@ class Settings:
     USERNAME_SYNC_INTERVAL_MINUTES: int = int(os.getenv("USERNAME_SYNC_INTERVAL_MINUTES", "15"))
     USERNAME_SYNC_MAX_AGE_HOURS: int = int(os.getenv("USERNAME_SYNC_MAX_AGE_HOURS", "24"))
     NOSTR_RELAYS: str = os.getenv("NOSTR_RELAYS", "wss://relay.azzamo.net,wss://relay.damus.io,wss://primal.net")
+    
+    # Default relays for NIP-05
+    DEFAULT_RELAYS: List[str] = os.getenv(
+        "NIP05_DEFAULT_RELAYS",
+        "wss://relay.damus.io,wss://nostr.bitcoiner.social,wss://nostr.fmt.wiz.biz"
+    ).split(",")
 
 # Global settings instance
 settings = Settings() 
