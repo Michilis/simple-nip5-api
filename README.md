@@ -384,74 +384,8 @@ DOMAIN=nip05.yourdomain.com
 USERNAME_SYNC_ENABLED=true
 ```
 
-### Docker (Recommended)
 
-**Dockerfile:**
-```dockerfile
-FROM python:3.11-slim
 
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-**docker-compose.yml:**
-```yaml
-version: '3.8'
-services:
-  nip05-api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - LNBITS_ENABLED=true
-      - DOMAIN=nip05.yourdomain.com
-    env_file:
-      - .env
-    restart: unless-stopped
-```
-
-### Reverse Proxy (Nginx)
-
-```nginx
-server {
-    listen 80;
-    server_name nip05.yourdomain.com;
-    
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    
-    location /.well-known/nostr.json {
-        proxy_pass http://localhost:8000/.well-known/nostr.json;
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods GET;
-        add_header Content-Type application/json;
-    }
-}
-```
-
-### SSL Setup (Certbot)
-
-```bash
-# Install certbot
-sudo apt install certbot python3-certbot-nginx
-
-# Get SSL certificate
-sudo certbot --nginx -d nip05.yourdomain.com
-
-# Verify auto-renewal
-sudo certbot renew --dry-run
-```
 
 ## Use Cases
 
