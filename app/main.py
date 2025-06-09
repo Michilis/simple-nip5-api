@@ -24,7 +24,12 @@ async def lifespan(app: FastAPI):
     
     # Start invoice polling scheduler
     invoice_scheduler.start()
-    logger.info("Invoice scheduler started")
+    
+    # Log LNbits status
+    if settings.LNBITS_ENABLED:
+        logger.info("LNbits integration enabled - Lightning payments available")
+    else:
+        logger.info("LNbits integration disabled - Admin-only registration mode")
     
     yield
     
@@ -33,7 +38,7 @@ async def lifespan(app: FastAPI):
     
     # Stop scheduler
     invoice_scheduler.stop()
-    logger.info("Invoice scheduler stopped")
+    logger.info("Application shutdown complete")
 
 # Create FastAPI application
 app = FastAPI(
@@ -65,21 +70,38 @@ async def root():
         "service": "Simple NIP-05 API",
         "status": "healthy",
         "version": "1.0.0",
-        "domain": settings.DOMAIN
+        "domain": settings.DOMAIN,
+        "lnbits_enabled": settings.LNBITS_ENABLED,
+        "username_sync_enabled": settings.USERNAME_SYNC_ENABLED
     }
 
 @app.get("/health")
 async def health_check():
     """Detailed health check"""
+    # Build endpoints list based on enabled features
+    endpoints = {
+        "nostr_json": f"/.well-known/nostr.json",
+        "admin_add": "/api/whitelist/add",
+        "admin_remove": "/api/whitelist/remove",
+        "admin_users": "/api/whitelist/users",
+        "admin_sync": "/api/whitelist/sync-usernames"
+    }
+    
+    # Add Lightning endpoints only if enabled
+    if settings.LNBITS_ENABLED:
+        endpoints.update({
+            "create_invoice": "/api/public/invoice",
+            "webhook": "/api/public/webhook/paid"
+        })
+    
     return {
         "status": "healthy",
         "scheduler_running": invoice_scheduler.is_running,
         "domain": settings.DOMAIN,
-        "endpoints": {
-            "nostr_json": f"/.well-known/nostr.json",
-            "create_invoice": "/api/public/invoice",
-            "webhook": "/api/public/webhook/paid",
-            "admin_add": "/api/whitelist/add",
-            "admin_remove": "/api/whitelist/remove"
-        }
+        "features": {
+            "lnbits_enabled": settings.LNBITS_ENABLED,
+            "username_sync_enabled": settings.USERNAME_SYNC_ENABLED,
+            "admin_only_mode": not settings.LNBITS_ENABLED
+        },
+        "endpoints": endpoints
     } 

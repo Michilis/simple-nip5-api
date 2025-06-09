@@ -10,6 +10,7 @@ class Settings:
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "your-secret-admin-key-here")
     
     # LNbits configuration
+    LNBITS_ENABLED: bool = os.getenv("LNBITS_ENABLED", "true").lower() == "true"
     LNBITS_API_KEY: str = os.getenv("LNBITS_API_KEY", "")
     LNBITS_ENDPOINT: str = os.getenv("LNBITS_ENDPOINT", "https://demo.lnbits.com")
     

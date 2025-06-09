@@ -22,13 +22,17 @@ class InvoiceScheduler:
     def start(self):
         """Start the background scheduler"""
         if not self.is_running:
-            # Invoice polling job
-            self.scheduler.add_job(
-                self.poll_unpaid_invoices,
-                IntervalTrigger(seconds=60),  # Check every minute
-                id='poll_invoices',
-                replace_existing=True
-            )
+            # Invoice polling job (only if LNbits is enabled)
+            if settings.LNBITS_ENABLED:
+                self.scheduler.add_job(
+                    self.poll_unpaid_invoices,
+                    IntervalTrigger(seconds=60),  # Check every minute
+                    id='poll_invoices',
+                    replace_existing=True
+                )
+                logger.info("Invoice polling enabled")
+            else:
+                logger.info("Invoice polling disabled (LNbits disabled)")
             
             # Username sync job (if enabled)
             if settings.USERNAME_SYNC_ENABLED:
@@ -42,17 +46,21 @@ class InvoiceScheduler:
             
             self.scheduler.start()
             self.is_running = True
-            logger.info("Invoice polling scheduler started")
+            logger.info("Background scheduler started")
     
     def stop(self):
         """Stop the background scheduler"""
         if self.is_running:
             self.scheduler.shutdown()
             self.is_running = False
-            logger.info("Invoice polling scheduler stopped")
+            logger.info("Background scheduler stopped")
     
     async def poll_unpaid_invoices(self):
         """Poll all unpaid invoices that are due for checking"""
+        if not settings.LNBITS_ENABLED:
+            logger.debug("Invoice polling skipped (LNbits disabled)")
+            return
+            
         db = SessionLocal()
         try:
             current_time = datetime.utcnow()
@@ -117,6 +125,9 @@ class InvoiceScheduler:
     
     async def check_invoice_payment(self, db: Session, invoice: Invoice):
         """Check a single invoice for payment"""
+        if not settings.LNBITS_ENABLED:
+            return
+            
         try:
             # Check payment status via LNbits
             is_paid = await lnbits_service.verify_payment(invoice.payment_hash)
@@ -169,6 +180,9 @@ class InvoiceScheduler:
     
     def update_polling_schedule(self, db: Session, invoice: Invoice):
         """Update the next polling time based on current attempts"""
+        if not settings.LNBITS_ENABLED:
+            return
+            
         try:
             invoice.poll_attempts += 1
             current_time = datetime.utcnow()
@@ -195,6 +209,10 @@ class InvoiceScheduler:
     
     async def schedule_invoice_polling(self, payment_hash: str):
         """Schedule a new invoice for polling"""
+        if not settings.LNBITS_ENABLED:
+            logger.debug("Invoice polling scheduling skipped (LNbits disabled)")
+            return
+            
         db = SessionLocal()
         try:
             invoice = db.query(Invoice).filter(Invoice.payment_hash == payment_hash).first()

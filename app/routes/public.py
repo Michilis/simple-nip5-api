@@ -19,6 +19,14 @@ from config import settings
 
 router = APIRouter(prefix="/api/public", tags=["public"])
 
+def check_lnbits_enabled():
+    """Check if LNbits functionality is enabled"""
+    if not settings.LNBITS_ENABLED:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Lightning payment functionality is disabled. Contact administrator for manual registration."
+        )
+
 @router.post("/invoice", response_model=InvoiceResponse)
 async def create_invoice(
     request: InvoiceRequest,
@@ -26,6 +34,9 @@ async def create_invoice(
     db: Session = Depends(get_db)
 ):
     """Create a Lightning invoice for NIP-05 registration"""
+    
+    # Check if LNbits is enabled
+    check_lnbits_enabled()
     
     try:
         # Validate and normalize inputs
@@ -132,6 +143,9 @@ async def webhook_payment_notification(
 ):
     """Handle webhook notification from LNbits when payment is received"""
     
+    # Check if LNbits is enabled
+    check_lnbits_enabled()
+    
     try:
         # Find the invoice
         invoice = db.query(Invoice).filter(
@@ -193,3 +207,4 @@ async def webhook_payment_notification(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Webhook processing error: {str(e)}"
         ) 
+        
