@@ -1,16 +1,17 @@
 # Simple NIP-05 API
 
-A Lightning-powered NIP-05 identity service that allows users to register a NIP-05 identity via LNbits payments and provides admin control over whitelist management.
+A Lightning-powered NIP-05 identity service that allows users to register a NIP-05 identity via LNbits payments and provides admin control over whitelist management. Can also run as an admin-only service without Lightning payments.
 
 ## Features
 
-- 🚀 **Lightning Payments**: Integrated with LNbits for instant Bitcoin payments
+- 🚀 **Lightning Payments**: Integrated with LNbits for instant Bitcoin payments (optional)
 - 🆔 **NIP-05 Identity**: Full NIP-05 identity verification support
 - 🔄 **Background Polling**: Robust payment verification with webhook fallback
 - 🛡️ **Admin Controls**: Secure API for user management
 - 📊 **Health Monitoring**: Built-in health checks and status endpoints
 - 🗄️ **Database Support**: SQLite by default, PostgreSQL ready
 - 🔗 **Nostr Sync**: Automatic username sync from Nostr profiles (kind:0 events)
+- ⚙️ **Flexible Mode**: Lightning mode or admin-only mode
 
 ## Quick Start
 
@@ -39,13 +40,21 @@ cp env.example .env
 nano .env
 ```
 
-**Required Configuration:**
+**Lightning Mode Configuration:**
 ```env
+LNBITS_ENABLED=true
 ADMIN_API_KEY=your-secret-admin-key-here
 LNBITS_API_KEY=your-lnbits-api-key-here
 LNBITS_ENDPOINT=https://your-lnbits-instance.com
 DOMAIN=yourdomain.com
 WEBHOOK_URL=https://yourdomain.com/api/public/webhook/paid
+```
+
+**Admin-Only Mode Configuration:**
+```env
+LNBITS_ENABLED=false
+ADMIN_API_KEY=your-secret-admin-key-here
+DOMAIN=yourdomain.com
 ```
 
 ### 3. Run the Application
@@ -60,11 +69,25 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 The API will be available at `http://localhost:8000`
 
+## Operating Modes
+
+### ⚡ Lightning Mode (`LNBITS_ENABLED=true`)
+- **Public Registration**: Users can self-register by paying Lightning invoices
+- **Automatic Processing**: Background tasks monitor and process payments
+- **Admin Override**: Admins can still manually add/remove users
+- **Full Feature Set**: All endpoints and functionality available
+
+### 👨‍💼 Admin-Only Mode (`LNBITS_ENABLED=false`)
+- **Manual Registration**: Only admins can add/remove users
+- **No Payment Processing**: Lightning endpoints return 503 Service Unavailable
+- **Resource Efficient**: No background invoice polling
+- **Pure NIP-05 Service**: Focus on identity resolution without payments
+
 ## API Endpoints
 
 ### Public Endpoints
 
-#### Create Invoice
+#### Create Invoice (Lightning Mode Only)
 ```http
 POST /api/public/invoice
 ```
@@ -78,7 +101,7 @@ POST /api/public/invoice
 }
 ```
 
-**Response:**
+**Response (Lightning Mode):**
 ```json
 {
   "payment_hash": "abc123...",
@@ -89,7 +112,14 @@ POST /api/public/invoice
 }
 ```
 
-#### Payment Webhook
+**Response (Admin-Only Mode):**
+```json
+{
+  "detail": "Lightning payment functionality is disabled. Contact administrator for manual registration."
+}
+```
+
+#### Payment Webhook (Lightning Mode Only)
 ```http
 POST /api/public/webhook/paid
 ```
@@ -207,6 +237,76 @@ curl -X POST http://localhost:8000/api/whitelist/sync-usernames \
   -H "X-API-Key: your-admin-key"
 ```
 
+## Health Monitoring
+
+### Health Check Endpoints
+
+#### Basic Status
+```http
+GET /
+```
+
+**Response:**
+```json
+{
+  "service": "Simple NIP-05 API",
+  "status": "healthy",
+  "version": "1.0.0",
+  "domain": "yourdomain.com",
+  "lnbits_enabled": true,
+  "username_sync_enabled": true
+}
+```
+
+#### Detailed Health Check
+```http
+GET /health
+```
+
+**Response (Lightning Mode):**
+```json
+{
+  "status": "healthy",
+  "scheduler_running": true,
+  "domain": "yourdomain.com",
+  "features": {
+    "lnbits_enabled": true,
+    "username_sync_enabled": true,
+    "admin_only_mode": false
+  },
+  "endpoints": {
+    "nostr_json": "/.well-known/nostr.json",
+    "create_invoice": "/api/public/invoice",
+    "webhook": "/api/public/webhook/paid",
+    "admin_add": "/api/whitelist/add",
+    "admin_remove": "/api/whitelist/remove",
+    "admin_users": "/api/whitelist/users",
+    "admin_sync": "/api/whitelist/sync-usernames"
+  }
+}
+```
+
+**Response (Admin-Only Mode):**
+```json
+{
+  "status": "healthy",
+  "scheduler_running": true,
+  "domain": "yourdomain.com",
+  "features": {
+    "lnbits_enabled": false,
+    "username_sync_enabled": true,
+    "admin_only_mode": true
+  },
+  "endpoints": {
+    "nostr_json": "/.well-known/nostr.json",
+    "admin_add": "/api/whitelist/add",
+    "admin_remove": "/api/whitelist/remove",
+    "admin_users": "/api/whitelist/users",
+    "admin_sync": "/api/whitelist/sync-usernames"
+  }
+}
+```
+
 ## Architecture
 
 ```
@@ -230,7 +330,7 @@ nip05-api/
 └── run.py                   # App entry point
 ```
 
-## Payment Flow
+## Payment Flow (Lightning Mode)
 
 1. **User Requests Invoice**: POST to `/api/public/invoice` with username and npub
 2. **Invoice Created**: System creates LNbits invoice and returns payment request
@@ -244,6 +344,7 @@ nip05-api/
 
 | Variable | Description | Default |
 |----------|-------------|---------|
+| `LNBITS_ENABLED` | Enable Lightning payment functionality | `true` |
 | `ADMIN_API_KEY` | Admin API authentication key | `"your-secret-admin-key-here"` |
 | `LNBITS_API_KEY` | LNbits API key | `""` |
 | `LNBITS_ENDPOINT` | LNbits instance URL | `"https://demo.lnbits.com"` |
@@ -260,8 +361,32 @@ nip05-api/
 
 ## Deployment
 
+### Environment Setup
+
+Create `.env` file based on your deployment mode:
+
+**Lightning Mode (.env):**
+```env
+LNBITS_ENABLED=true
+ADMIN_API_KEY=super-secret-admin-key-123
+LNBITS_API_KEY=your-lnbits-api-key
+LNBITS_ENDPOINT=https://your-lnbits.com
+DOMAIN=nip05.yourdomain.com
+WEBHOOK_URL=https://nip05.yourdomain.com/api/public/webhook/paid
+USERNAME_SYNC_ENABLED=true
+```
+
+**Admin-Only Mode (.env):**
+```env
+LNBITS_ENABLED=false
+ADMIN_API_KEY=super-secret-admin-key-123
+DOMAIN=nip05.yourdomain.com
+USERNAME_SYNC_ENABLED=true
+```
+
 ### Docker (Recommended)
 
+**Dockerfile:**
 ```dockerfile
 FROM python:3.11-slim
 
@@ -275,46 +400,173 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
+**docker-compose.yml:**
+```yaml
+version: '3.8'
+services:
+  nip05-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - LNBITS_ENABLED=true
+      - DOMAIN=nip05.yourdomain.com
+    env_file:
+      - .env
+    restart: unless-stopped
+```
+
 ### Reverse Proxy (Nginx)
 
 ```nginx
 server {
     listen 80;
-    server_name yourdomain.com;
+    server_name nip05.yourdomain.com;
     
     location / {
         proxy_pass http://localhost:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
     
     location /.well-known/nostr.json {
         proxy_pass http://localhost:8000/.well-known/nostr.json;
         add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods GET;
+        add_header Content-Type application/json;
     }
 }
 ```
 
-## Health Monitoring
+### SSL Setup (Certbot)
 
-- **Health Check**: `GET /health`
-- **Basic Status**: `GET /`
-- **Logs**: Application logs include scheduler status and payment processing
+```bash
+# Install certbot
+sudo apt install certbot python3-certbot-nginx
+
+# Get SSL certificate
+sudo certbot --nginx -d nip05.yourdomain.com
+
+# Verify auto-renewal
+sudo certbot renew --dry-run
+```
+
+## Use Cases
+
+### 🏢 Commercial NIP-05 Service
+- **Lightning Mode**: Users pay sats for NIP-05 identity
+- **Automatic processing**: Minimal manual intervention
+- **Scalable**: Handles high volume of registrations
+
+### 🏠 Personal/Community Service  
+- **Admin-Only Mode**: Free service for friends/community
+- **Manual approval**: Full control over registrations
+- **Cost-effective**: No Lightning infrastructure needed
+
+### 🔄 Hybrid Service
+- **Start Admin-Only**: Begin with manual registrations
+- **Upgrade to Lightning**: Enable payments when ready
+- **Gradual transition**: Existing users unaffected
+
+## Testing
+
+### Manual Testing Commands
+
+```bash
+# Check service status
+curl http://localhost:8000/health
+
+# Test nostr.json endpoint
+curl http://localhost:8000/.well-known/nostr.json
+
+# Add user (admin)
+curl -X POST http://localhost:8000/api/whitelist/add \
+  -H "X-API-Key: your-admin-key" \
+  -H "Content-Type: application/json" \
+  -d '{"username": "alice", "npub": "npub1..."}'
+
+# Create invoice (Lightning mode)
+curl -X POST http://localhost:8000/api/public/invoice \
+  -H "Content-Type: application/json" \
+  -d '{"username": "bob", "npub": "npub1...", "subscription_type": "yearly"}'
+
+# Trigger username sync
+curl -X POST http://localhost:8000/api/whitelist/sync-usernames \
+  -H "X-API-Key: your-admin-key"
+```
+
+### Automated Testing
+
+```bash
+# Run with pytest (when tests are added)
+pip install pytest pytest-asyncio httpx
+pytest
+
+# Load testing with curl
+for i in {1..10}; do
+  curl -s http://localhost:8000/health > /dev/null &
+done
+wait
+```
 
 ## Security
 
-- Admin endpoints are protected by API key authentication
-- Input validation and normalization for all user data
-- CORS enabled for `.well-known/nostr.json` endpoint
-- SQL injection protection via SQLAlchemy ORM
+### Best Practices
+
+- 🔐 **Strong Admin Keys**: Use cryptographically secure API keys
+- 🔒 **HTTPS Only**: Always use SSL in production
+- 🛡️ **Input Validation**: All inputs validated and sanitized
+- 🚫 **Rate Limiting**: Consider adding rate limiting for public endpoints
+- 📝 **Access Logs**: Monitor access patterns
+- 🔄 **Key Rotation**: Regularly rotate API keys
+
+### Security Headers
+
+```nginx
+# Add to nginx config
+add_header X-Frame-Options DENY;
+add_header X-Content-Type-Options nosniff;
+add_header X-XSS-Protection "1; mode=block";
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
+```
+
+## Troubleshooting
+
+### Common Issues
+
+**Issue**: Invoice endpoints return 503
+- **Solution**: Check `LNBITS_ENABLED=true` in .env
+
+**Issue**: Username sync not working  
+- **Solution**: Verify `NOSTR_RELAYS` are reachable and `USERNAME_SYNC_ENABLED=true`
+
+**Issue**: Users not appearing in nostr.json
+- **Solution**: Check `is_active=true` in database and domain configuration
+
+**Issue**: LNbits webhook not working
+- **Solution**: Verify `WEBHOOK_URL` is publicly accessible and correct
+
+### Debug Mode
+
+```bash
+# Enable debug logging
+export LOG_LEVEL=DEBUG
+python run.py
+
+# Check logs
+tail -f /var/log/nip05-api.log
+```
 
 ## Contributing
 
 1. Fork the repository
-2. Create a feature branch
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
 4. Add tests if applicable
-5. Submit a pull request
+5. Update documentation
+6. Submit a pull request
 
 ## License
 
@@ -323,6 +575,11 @@ MIT License - see LICENSE file for details
 ## Support
 
 For issues and questions:
-- Create an issue on GitHub
-- Check the logs at `/health` endpoint
-- Verify your LNbits configuration 
+- 📋 **GitHub Issues**: Create an issue with detailed description
+- 📊 **Health Check**: Check `/health` endpoint for system status
+- 🔧 **Configuration**: Verify your `.env` settings
+- 📖 **Documentation**: Refer to this README for setup instructions
+
+---
+
+**Made with ⚡ for the Nostr ecosystem** 
