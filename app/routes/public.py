@@ -48,7 +48,7 @@ def check_lnbits_enabled():
     - 1-50 characters in length
     
     ### Subscription Types:
-    - **yearly**: {yearly_price} sats
+    - **yearly**: {yearly_price} sats per year (can specify multiple years)
     - **lifetime**: {lifetime_price} sats
     
     The user pays the returned `payment_request` (BOLT11 invoice) with any Lightning wallet.
@@ -119,30 +119,31 @@ async def create_invoice(
         
         pubkey = npub_to_pubkey(request.npub)
         
-        # Check if username is available
+        # Check if username is available or renewal for same user
         existing_user = db.query(User).filter(User.username == username).first()
         if existing_user and existing_user.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Username already taken"
-            )
+            # Allow renewal if it's the same public key
+            if existing_user.pubkey != pubkey:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Username already taken by different user"
+                )
+            # Same user - this is a renewal, allow it to proceed
         
-        # Check for existing unpaid invoice
-        existing_invoice = db.query(Invoice).filter(
+        # Remove any existing unpaid invoices for this username
+        existing_invoices = db.query(Invoice).filter(
             Invoice.username == username,
-            Invoice.status == "unpaid",
-            Invoice.expires_at > datetime.utcnow()
-        ).first()
+            Invoice.status == "unpaid"
+        ).all()
         
-        if existing_invoice:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Unpaid invoice already exists for this username"
-            )
+        for existing_invoice in existing_invoices:
+            db.delete(existing_invoice)
         
-        # Determine amount based on subscription type
+        db.commit()  # Commit the deletions before creating new invoice
+        
+        # Determine amount based on subscription type and years
         if request.subscription_type == "yearly":
-            amount_sats = settings.NIP05_YEARLY_PRICE_SATS
+            amount_sats = settings.NIP05_YEARLY_PRICE_SATS * request.years
         elif request.subscription_type == "lifetime":
             amount_sats = settings.NIP05_LIFETIME_PRICE_SATS
         else:
@@ -153,6 +154,8 @@ async def create_invoice(
         
         # Create invoice via LNbits
         memo = f"NIP-05 {request.subscription_type} registration for {username}@{settings.DOMAIN}"
+        if request.subscription_type == "yearly" and request.years > 1:
+            memo += f" ({request.years} years)"
         webhook_url = settings.WEBHOOK_URL
         
         lnbits_response = await lnbits_service.create_invoice(
@@ -171,6 +174,7 @@ async def create_invoice(
             username=username,
             pubkey=pubkey,
             npub=request.npub,
+            subscription_type=request.subscription_type,
             expires_at=expires_at
         )
         
@@ -208,6 +212,7 @@ async def create_invoice(
 @router.post(
     "/webhook/paid", 
     response_model=StatusResponse,
+    include_in_schema=False,  # Hide from Swagger docs
     summary="Payment Webhook",
     description="""
     Handle webhook notification from LNbits when a payment is received.
@@ -277,21 +282,44 @@ async def webhook_payment_notification(
             )
         
         if payload.paid:
-            # Payment confirmed - activate user
+            # Payment confirmed - activate user and handle subscription
             existing_user = db.query(User).filter(User.username == invoice.username).first()
+            
+            # Calculate subscription expiration date
+            now = datetime.utcnow()
+            if invoice.subscription_type == "yearly":
+                # Calculate years from amount paid
+                years = invoice.amount_sats // settings.NIP05_YEARLY_PRICE_SATS
+                if years < 1:
+                    years = 1  # Default to 1 year if calculation is wrong
+                
+                if existing_user and existing_user.expires_at and existing_user.expires_at > now:
+                    # User has active subscription, extend by years from current expiration
+                    new_expires_at = existing_user.expires_at + timedelta(days=365 * years)
+                else:
+                    # New subscription or expired subscription, start from now
+                    new_expires_at = now + timedelta(days=365 * years)
+            elif invoice.subscription_type == "lifetime":
+                new_expires_at = None  # Lifetime subscription never expires
+            else:
+                new_expires_at = now + timedelta(days=365)  # Default to yearly
             
             if existing_user:
                 # Update existing user
                 existing_user.pubkey = invoice.pubkey
                 existing_user.npub = invoice.npub
                 existing_user.is_active = True
+                existing_user.expires_at = new_expires_at
+                existing_user.subscription_type = invoice.subscription_type
             else:
                 # Create new user
                 new_user = User(
                     username=invoice.username,
                     pubkey=invoice.pubkey,
                     npub=invoice.npub,
-                    is_active=True
+                    is_active=True,
+                    expires_at=new_expires_at,
+                    subscription_type=invoice.subscription_type
                 )
                 db.add(new_user)
             
@@ -301,9 +329,17 @@ async def webhook_payment_notification(
             
             db.commit()
             
+            # Prepare response message
+            if invoice.subscription_type == "lifetime":
+                message = f"Lifetime subscription activated for {invoice.username}"
+            else:
+                expires_str = new_expires_at.strftime("%Y-%m-%d") if new_expires_at else "never"
+                years = invoice.amount_sats // settings.NIP05_YEARLY_PRICE_SATS
+                message = f"{years}-year subscription for {invoice.username} expires on {expires_str}"
+            
             return StatusResponse(
                 status="success",
-                message=f"Payment confirmed for {invoice.username}"
+                message=message
             )
         else:
             return StatusResponse(

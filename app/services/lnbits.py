@@ -44,7 +44,7 @@ class LNbitsService:
                 data = response.json()
                 return {
                     'payment_hash': data['payment_hash'],
-                    'payment_request': data['payment_request']
+                    'payment_request': data['bolt11']
                 }
             except httpx.HTTPError as e:
                 raise Exception(f"LNbits API error: {str(e)}")

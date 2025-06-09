@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 
 # Invoice Request/Response schemas
@@ -20,15 +20,23 @@ class InvoiceRequest(BaseModel):
         ..., 
         description="Subscription duration type",
         example="yearly",
-        regex="^(yearly|lifetime)$"
+        pattern="^(yearly|lifetime)$"
+    )
+    years: int = Field(
+        1,
+        description="Number of years for yearly subscription (ignored for lifetime)",
+        example=1,
+        ge=1,
+        le=10
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "username": "alice",
                 "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
-                "subscription_type": "yearly"
+                "subscription_type": "yearly",
+                "years": 1
             }
         }
 
@@ -60,7 +68,7 @@ class InvoiceResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "payment_hash": "d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567",
                 "payment_request": "lnbc10000n1p3xnhl2pp5d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567...",
@@ -86,7 +94,7 @@ class AddUserRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "username": "bob",
                 "npub": "npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
@@ -101,7 +109,7 @@ class RemoveUserRequest(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "username": "bob"
             }
@@ -121,6 +129,12 @@ class UserResponse(BaseModel):
         example="npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
     )
     is_active: bool = Field(..., description="Whether the user is active and appears in nostr.json", example=True)
+    subscription_type: Optional[str] = Field(None, description="Subscription type (yearly/lifetime)", example="yearly")
+    expires_at: Optional[datetime] = Field(
+        None, 
+        description="Subscription expiration timestamp (null for lifetime)",
+        example="2025-01-01T12:00:00.000Z"
+    )
     created_at: datetime = Field(
         ..., 
         description="User creation timestamp (ISO 8601)",
@@ -128,13 +142,15 @@ class UserResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "id": 123,
                 "username": "alice",
                 "pubkey": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
                 "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
                 "is_active": True,
+                "subscription_type": "yearly",
+                "expires_at": "2025-01-01T12:00:00.000Z",
                 "created_at": "2024-01-01T12:00:00.000Z"
             }
         }
@@ -158,7 +174,7 @@ class WebhookPayload(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "payment_hash": "d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567",
                 "paid": True,
@@ -176,13 +192,29 @@ class NostrJsonResponse(BaseModel):
             "bob": "def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
         }
     )
+    relays: Optional[Dict[str, List[str]]] = Field(
+        None,
+        description="Mapping of hex public keys to their recommended relay URLs",
+        example={
+            "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890": [
+                "wss://relay.example.com",
+                "wss://relay2.example.com"
+            ]
+        }
+    )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "names": {
                     "alice": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
                     "bob": "def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
+                },
+                "relays": {
+                    "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890": [
+                        "wss://relay.example.com",
+                        "wss://relay2.example.com"
+                    ]
                 }
             }
         }
@@ -201,7 +233,7 @@ class StatusResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "status": "success",
                 "message": "User alice added successfully"
@@ -222,7 +254,7 @@ class ErrorResponse(BaseModel):
     )
     
     class Config:
-        schema_extra = {
+        json_schema_extra = {
             "example": {
                 "error": "ValidationError",
                 "detail": "Username must start with alphanumeric character"
