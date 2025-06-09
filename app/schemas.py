@@ -4,49 +4,252 @@ from datetime import datetime
 
 # Invoice Request/Response schemas
 class InvoiceRequest(BaseModel):
-    username: str = Field(..., min_length=1, max_length=50, description="Desired NIP-05 username")
-    npub: str = Field(..., description="User's nostr public key in npub format")
-    subscription_type: str = Field(..., description="Either 'yearly' or 'lifetime'")
+    username: str = Field(
+        ..., 
+        min_length=1, 
+        max_length=50, 
+        description="Desired NIP-05 username (alphanumeric, dots, dashes, underscores only)",
+        example="alice"
+    )
+    npub: str = Field(
+        ..., 
+        description="User's nostr public key in npub (bech32) format",
+        example="npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
+    )
+    subscription_type: str = Field(
+        ..., 
+        description="Subscription duration type",
+        example="yearly",
+        regex="^(yearly|lifetime)$"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "username": "alice",
+                "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+                "subscription_type": "yearly"
+            }
+        }
 
 class InvoiceResponse(BaseModel):
-    payment_hash: str
-    payment_request: str
-    amount_sats: int
-    expires_at: datetime
-    username: str
+    payment_hash: str = Field(
+        ...,
+        description="Unique payment hash for this Lightning invoice",
+        example="d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567"
+    )
+    payment_request: str = Field(
+        ...,
+        description="BOLT11 Lightning invoice payment request",
+        example="lnbc10000n1p3xnhl2pp5d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567sp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygs9qrsgq..."
+    )
+    amount_sats: int = Field(
+        ...,
+        description="Invoice amount in satoshis",
+        example=1000
+    )
+    expires_at: datetime = Field(
+        ...,
+        description="Invoice expiration timestamp (ISO 8601)",
+        example="2024-01-15T14:30:00.000Z"
+    )
+    username: str = Field(
+        ...,
+        description="Normalized username that will be registered",
+        example="alice"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "payment_hash": "d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567",
+                "payment_request": "lnbc10000n1p3xnhl2pp5d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567...",
+                "amount_sats": 1000,
+                "expires_at": "2024-01-15T14:30:00.000Z",
+                "username": "alice"
+            }
+        }
 
 # Admin schemas
 class AddUserRequest(BaseModel):
-    username: str = Field(..., min_length=1, max_length=50)
-    npub: str = Field(..., description="User's nostr public key in npub format")
+    username: str = Field(
+        ..., 
+        min_length=1, 
+        max_length=50,
+        description="Username to add (alphanumeric, dots, dashes, underscores only)",
+        example="bob"
+    )
+    npub: str = Field(
+        ..., 
+        description="User's nostr public key in npub (bech32) format",
+        example="npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "username": "bob",
+                "npub": "npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
+            }
+        }
 
 class RemoveUserRequest(BaseModel):
-    username: str = Field(..., description="Username to remove")
+    username: str = Field(
+        ..., 
+        description="Username to remove from the system",
+        example="bob"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "username": "bob"
+            }
+        }
 
 class UserResponse(BaseModel):
-    id: int
-    username: str
-    pubkey: str
-    npub: str
-    is_active: bool
-    created_at: datetime
+    id: int = Field(..., description="User's unique database ID", example=123)
+    username: str = Field(..., description="User's NIP-05 username", example="alice")
+    pubkey: str = Field(
+        ..., 
+        description="User's nostr public key in hex format",
+        example="abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
+    )
+    npub: str = Field(
+        ..., 
+        description="User's nostr public key in npub (bech32) format",
+        example="npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
+    )
+    is_active: bool = Field(..., description="Whether the user is active and appears in nostr.json", example=True)
+    created_at: datetime = Field(
+        ..., 
+        description="User creation timestamp (ISO 8601)",
+        example="2024-01-01T12:00:00.000Z"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "id": 123,
+                "username": "alice",
+                "pubkey": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+                "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+                "is_active": True,
+                "created_at": "2024-01-01T12:00:00.000Z"
+            }
+        }
 
 # Webhook schemas
 class WebhookPayload(BaseModel):
-    payment_hash: str
-    paid: bool
-    amount: int
+    payment_hash: str = Field(
+        ...,
+        description="Payment hash from the Lightning invoice",
+        example="d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567"
+    )
+    paid: bool = Field(
+        ...,
+        description="Whether the payment has been confirmed",
+        example=True
+    )
+    amount: int = Field(
+        ...,
+        description="Payment amount in satoshis",
+        example=1000
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "payment_hash": "d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567",
+                "paid": True,
+                "amount": 1000
+            }
+        }
     
 # NIP-05 schemas
 class NostrJsonResponse(BaseModel):
-    names: Dict[str, str]
+    names: Dict[str, str] = Field(
+        ...,
+        description="Mapping of usernames to their hex public keys",
+        example={
+            "alice": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+            "bob": "def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
+        }
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "names": {
+                    "alice": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+                    "bob": "def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
+                }
+            }
+        }
     
 # Status schemas
 class StatusResponse(BaseModel):
-    status: str
-    message: str
+    status: str = Field(
+        ...,
+        description="Operation status",
+        example="success"
+    )
+    message: str = Field(
+        ...,
+        description="Human-readable status message",
+        example="User alice added successfully"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "status": "success",
+                "message": "User alice added successfully"
+            }
+        }
 
 # Error schemas
 class ErrorResponse(BaseModel):
-    error: str
-    detail: Optional[str] = None 
+    error: str = Field(
+        ...,
+        description="Error type or category",
+        example="ValidationError"
+    )
+    detail: Optional[str] = Field(
+        None,
+        description="Detailed error message",
+        example="Username must start with alphanumeric character"
+    )
+    
+    class Config:
+        schema_extra = {
+            "example": {
+                "error": "ValidationError",
+                "detail": "Username must start with alphanumeric character"
+            }
+        }
+
+# Health check schemas
+class HealthResponse(BaseModel):
+    status: str = Field(..., description="Overall system health status", example="healthy")
+    scheduler_running: bool = Field(..., description="Whether background scheduler is running", example=True)
+    domain: str = Field(..., description="Configured domain for NIP-05 identities", example="nip05.yourdomain.com")
+    features: Dict[str, bool] = Field(
+        ...,
+        description="Enabled/disabled feature flags",
+        example={
+            "lnbits_enabled": True,
+            "username_sync_enabled": True,
+            "admin_only_mode": False
+        }
+    )
+    endpoints: Dict[str, str] = Field(
+        ...,
+        description="Available API endpoints based on enabled features",
+        example={
+            "nostr_json": "/.well-known/nostr.json",
+            "create_invoice": "/api/public/invoice",
+            "webhook": "/api/public/webhook/paid"
+        }
+    )
+    documentation: str = Field(..., description="API documentation URL", example="/api-docs") 

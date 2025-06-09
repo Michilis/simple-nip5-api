@@ -27,7 +27,76 @@ def check_lnbits_enabled():
             detail="Lightning payment functionality is disabled. Contact administrator for manual registration."
         )
 
-@router.post("/invoice", response_model=InvoiceResponse)
+@router.post(
+    "/invoice", 
+    response_model=InvoiceResponse,
+    summary="Create Lightning Invoice",
+    description="""
+    Create a Lightning invoice for NIP-05 registration.
+    
+    **Lightning Mode Only** - This endpoint is only available when `LNBITS_ENABLED=true`.
+    
+    ### Process:
+    1. Validates username and npub format
+    2. Checks username availability
+    3. Creates Lightning invoice via LNbits
+    4. Schedules background payment monitoring
+    
+    ### Username Rules:
+    - Alphanumeric characters, dots, dashes, underscores only
+    - Must start with alphanumeric character
+    - 1-50 characters in length
+    
+    ### Subscription Types:
+    - **yearly**: {yearly_price} sats
+    - **lifetime**: {lifetime_price} sats
+    
+    The user pays the returned `payment_request` (BOLT11 invoice) with any Lightning wallet.
+    Once paid, the user will be automatically activated and appear in `/.well-known/nostr.json`.
+    """.format(
+        yearly_price=settings.NIP05_YEARLY_PRICE_SATS,
+        lifetime_price=settings.NIP05_LIFETIME_PRICE_SATS
+    ),
+    responses={
+        200: {
+            "description": "Invoice created successfully",
+            "model": InvoiceResponse
+        },
+        400: {
+            "description": "Invalid input (bad username, npub, or subscription type)",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Invalid npub format"
+                    }
+                }
+            }
+        },
+        409: {
+            "description": "Username already taken or unpaid invoice exists",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Username already taken"
+                    }
+                }
+            }
+        },
+        503: {
+            "description": "Lightning payments disabled (admin-only mode)",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Lightning payment functionality is disabled. Contact administrator for manual registration."
+                    }
+                }
+            }
+        }
+    }
+)
 async def create_invoice(
     request: InvoiceRequest,
     background_tasks: BackgroundTasks,
@@ -136,7 +205,50 @@ async def create_invoice(
             detail=f"Failed to create invoice: {str(e)}"
         )
 
-@router.post("/webhook/paid", response_model=StatusResponse)
+@router.post(
+    "/webhook/paid", 
+    response_model=StatusResponse,
+    summary="Payment Webhook",
+    description="""
+    Handle webhook notification from LNbits when a payment is received.
+    
+    **Lightning Mode Only** - This endpoint is only available when `LNBITS_ENABLED=true`.
+    
+    ### Webhook Flow:
+    1. LNbits sends webhook when payment is confirmed
+    2. System finds matching invoice
+    3. User is activated automatically
+    4. Username appears in `/.well-known/nostr.json`
+    
+    ### Security:
+    This endpoint should only be called by your LNbits instance.
+    Configure the webhook URL in your LNbits settings.
+    
+    ### Webhook URL Format:
+    `https://yourdomain.com/api/public/webhook/paid`
+    """,
+    responses={
+        200: {
+            "description": "Webhook processed successfully",
+            "model": StatusResponse
+        },
+        404: {
+            "description": "Invoice not found",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Invoice not found"
+                    }
+                }
+            }
+        },
+        503: {
+            "description": "Lightning payments disabled (admin-only mode)",
+            "model": ErrorResponse
+        }
+    }
+)
 async def webhook_payment_notification(
     payload: WebhookPayload,
     db: Session = Depends(get_db)

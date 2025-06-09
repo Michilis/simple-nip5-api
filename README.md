@@ -12,6 +12,37 @@ A Lightning-powered NIP-05 identity service that allows users to register a NIP-
 - 🗄️ **Database Support**: SQLite by default, PostgreSQL ready
 - 🔗 **Nostr Sync**: Automatic username sync from Nostr profiles (kind:0 events)
 - ⚙️ **Flexible Mode**: Lightning mode or admin-only mode
+- 📚 **API Documentation**: Interactive Swagger documentation
+
+## API Documentation
+
+### 📚 Interactive Documentation
+
+Once your application is running, visit **`/api-docs`** for comprehensive Swagger documentation:
+
+```
+http://localhost:8000/api-docs
+```
+
+The documentation includes:
+- **Complete API Reference**: All endpoints with descriptions and examples
+- **Try It Out**: Interactive testing directly in the browser
+- **Request/Response Models**: Detailed schema documentation
+- **Authentication Guide**: How to use API keys
+- **Response Codes**: All possible HTTP status codes and meanings
+
+### 🎯 Quick API Overview
+
+| Endpoint | Method | Description | Authentication |
+|----------|---------|-------------|----------------|
+| `/.well-known/nostr.json` | GET | NIP-05 identity resolution | None |
+| `/api/public/invoice` | POST | Create Lightning invoice | None |
+| `/api/public/webhook/paid` | POST | Payment webhook | None |
+| `/api/whitelist/add` | POST | Add user manually | API Key |
+| `/api/whitelist/remove` | POST | Remove user | API Key |
+| `/api/whitelist/users` | GET | List all users | API Key |
+| `/api/whitelist/sync-usernames` | POST | Sync from Nostr profiles | API Key |
+| `/health` | GET | System health check | None |
 
 ## Quick Start
 
@@ -44,7 +75,7 @@ nano .env
 ```env
 LNBITS_ENABLED=true
 ADMIN_API_KEY=your-secret-admin-key-here
-LNBITS_API_KEY=your-lnbits-api-key-here
+LNBITS_API_KEY=your-lnbits-api-key
 LNBITS_ENDPOINT=https://your-lnbits-instance.com
 DOMAIN=yourdomain.com
 WEBHOOK_URL=https://yourdomain.com/api/public/webhook/paid
@@ -384,8 +415,74 @@ DOMAIN=nip05.yourdomain.com
 USERNAME_SYNC_ENABLED=true
 ```
 
+### Docker (Recommended)
 
+**Dockerfile:**
+```dockerfile
+FROM python:3.11-slim
 
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install -r requirements.txt
+
+COPY . .
+EXPOSE 8000
+
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+**docker-compose.yml:**
+```yaml
+version: '3.8'
+services:
+  nip05-api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - LNBITS_ENABLED=true
+      - DOMAIN=nip05.yourdomain.com
+    env_file:
+      - .env
+    restart: unless-stopped
+```
+
+### Reverse Proxy (Nginx)
+
+```nginx
+server {
+    listen 80;
+    server_name nip05.yourdomain.com;
+    
+    location / {
+        proxy_pass http://localhost:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    
+    location /.well-known/nostr.json {
+        proxy_pass http://localhost:8000/.well-known/nostr.json;
+        add_header Access-Control-Allow-Origin *;
+        add_header Access-Control-Allow-Methods GET;
+        add_header Content-Type application/json;
+    }
+}
+```
+
+### SSL Setup (Certbot)
+
+```bash
+# Install certbot
+sudo apt install certbot python3-certbot-nginx
+
+# Get SSL certificate
+sudo certbot --nginx -d nip05.yourdomain.com
+
+# Verify auto-renewal
+sudo certbot renew --dry-run
+```
 
 ## Use Cases
 
@@ -405,6 +502,15 @@ USERNAME_SYNC_ENABLED=true
 - **Gradual transition**: Existing users unaffected
 
 ## Testing
+
+### 📚 API Documentation
+
+First, check out the interactive API documentation at `/api-docs`:
+```
+http://localhost:8000/api-docs
+```
+
+Use the "Try it out" feature to test endpoints directly in your browser!
 
 ### Manual Testing Commands
 

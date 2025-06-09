@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, BackgroundTasks
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from datetime import datetime, timedelta
 
 from app.database import get_db
 from app.models import User
@@ -12,27 +13,91 @@ from app.schemas import (
     ErrorResponse
 )
 from app.services.nip05 import normalize_username, npub_to_pubkey, validate_npub
-from app.services.nostr_sync import nostr_sync_service
+from app.services.nostr_sync import sync_username
 from config import settings
 
 router = APIRouter(prefix="/api/whitelist", tags=["admin"])
 
-def verify_admin_key(x_api_key: str = Header(..., alias="X-API-Key")):
+def verify_admin_key(x_api_key: str = Header(..., description="Admin API key for authentication")):
     """Verify admin API key"""
     if x_api_key != settings.ADMIN_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key"
         )
-    return True
+    return x_api_key
 
-@router.post("/add", response_model=StatusResponse)
+@router.post(
+    "/add", 
+    response_model=StatusResponse,
+    summary="Add User (Admin Only)",
+    description="""
+    Manually add a user to the NIP-05 whitelist.
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    ### Process:
+    1. Validates username and npub format
+    2. Checks username availability
+    3. Adds user to database
+    4. User immediately appears in `/.well-known/nostr.json`
+    
+    ### Use Cases:
+    - **Admin-Only Mode**: Primary method for adding users
+    - **Lightning Mode**: Manual overrides and free additions
+    - **Testing**: Add test users without payment
+    
+    ### Username Rules:
+    - Alphanumeric characters, dots, dashes, underscores only
+    - Must start with alphanumeric character
+    - 1-50 characters in length
+    """,
+    responses={
+        200: {
+            "description": "User added successfully",
+            "model": StatusResponse
+        },
+        400: {
+            "description": "Invalid input (bad username or npub format)",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Invalid npub format"
+                    }
+                }
+            }
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Invalid API key"
+                    }
+                }
+            }
+        },
+        409: {
+            "description": "Username already exists",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Username already exists"
+                    }
+                }
+            }
+        }
+    }
+)
 async def add_user(
     request: AddUserRequest,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_key)
+    _: str = Depends(verify_admin_key)
 ):
-    """Add user to whitelist (Admin only)"""
+    """Add a user to the NIP-05 whitelist"""
     
     try:
         # Validate and normalize inputs
@@ -46,31 +111,28 @@ async def add_user(
         
         pubkey = npub_to_pubkey(request.npub)
         
-        # Check if user already exists
+        # Check if username already exists
         existing_user = db.query(User).filter(User.username == username).first()
-        
         if existing_user:
-            # Update existing user
-            existing_user.pubkey = pubkey
-            existing_user.npub = request.npub
-            existing_user.is_active = True
-            message = f"User {username} updated successfully"
-        else:
-            # Create new user
-            new_user = User(
-                username=username,
-                pubkey=pubkey,
-                npub=request.npub,
-                is_active=True
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Username already exists"
             )
-            db.add(new_user)
-            message = f"User {username} added successfully"
         
+        # Create new user
+        new_user = User(
+            username=username,
+            pubkey=pubkey,
+            npub=request.npub,
+            is_active=True
+        )
+        
+        db.add(new_user)
         db.commit()
         
         return StatusResponse(
             status="success",
-            message=message
+            message=f"User {username} added successfully"
         )
         
     except HTTPException:
@@ -87,20 +149,58 @@ async def add_user(
             detail=f"Failed to add user: {str(e)}"
         )
 
-@router.post("/remove", response_model=StatusResponse)
+@router.post(
+    "/remove", 
+    response_model=StatusResponse,
+    summary="Remove User (Admin Only)",
+    description="""
+    Remove a user from the NIP-05 whitelist.
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    ### Process:
+    1. Finds user by username
+    2. Removes user from database
+    3. User no longer appears in `/.well-known/nostr.json`
+    
+    ### Important Notes:
+    - This completely removes the user from the system
+    - Any paid invoices for this username will become invalid
+    - The username becomes available for re-registration
+    """,
+    responses={
+        200: {
+            "description": "User removed successfully",
+            "model": StatusResponse
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse
+        },
+        404: {
+            "description": "User not found",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "User not found"
+                    }
+                }
+            }
+        }
+    }
+)
 async def remove_user(
     request: RemoveUserRequest,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_key)
+    _: str = Depends(verify_admin_key)
 ):
-    """Remove user from whitelist (Admin only)"""
+    """Remove a user from the NIP-05 whitelist"""
     
     try:
         username = normalize_username(request.username)
         
-        # Find and remove user
         user = db.query(User).filter(User.username == username).first()
-        
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -117,11 +217,6 @@ async def remove_user(
         
     except HTTPException:
         raise
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -129,13 +224,45 @@ async def remove_user(
             detail=f"Failed to remove user: {str(e)}"
         )
 
-@router.get("/users", response_model=List[UserResponse])
+@router.get(
+    "/users", 
+    response_model=List[UserResponse],
+    summary="List Users (Admin Only)",
+    description="""
+    List all users in the system with optional filtering.
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    ### Query Parameters:
+    - **active_only**: If `true`, only returns active users (those appearing in nostr.json)
+    - **username**: Filter by specific username (partial matches supported)
+    
+    ### Response Fields:
+    - **id**: Database ID
+    - **username**: NIP-05 username
+    - **pubkey**: Hex format public key
+    - **npub**: Bech32 format public key
+    - **is_active**: Whether user appears in nostr.json
+    - **created_at**: User creation timestamp
+    """,
+    responses={
+        200: {
+            "description": "List of users",
+            "model": List[UserResponse]
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse
+        }
+    }
+)
 async def list_users(
-    active_only: bool = True,
+    active_only: Optional[bool] = Query(False, description="Only return active users"),
+    username: Optional[str] = Query(None, description="Filter by username (partial match)"),
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_key)
+    _: str = Depends(verify_admin_key)
 ):
-    """List all users in whitelist (Admin only)"""
+    """List users with optional filtering"""
     
     try:
         query = db.query(User)
@@ -143,7 +270,10 @@ async def list_users(
         if active_only:
             query = query.filter(User.is_active == True)
         
-        users = query.all()
+        if username:
+            query = query.filter(User.username.contains(username))
+        
+        users = query.order_by(User.created_at.desc()).all()
         
         return [
             UserResponse(
@@ -163,19 +293,45 @@ async def list_users(
             detail=f"Failed to list users: {str(e)}"
         )
 
-@router.post("/activate/{username}", response_model=StatusResponse)
+@router.post(
+    "/activate/{username}", 
+    response_model=StatusResponse,
+    summary="Activate User (Admin Only)",
+    description="""
+    Activate a user (make them appear in nostr.json).
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    Useful for:
+    - Re-enabling previously deactivated users
+    - Manually activating users added with is_active=false
+    """,
+    responses={
+        200: {
+            "description": "User activated successfully",
+            "model": StatusResponse
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse
+        },
+        404: {
+            "description": "User not found",
+            "model": ErrorResponse
+        }
+    }
+)
 async def activate_user(
     username: str,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_key)
+    _: str = Depends(verify_admin_key)
 ):
-    """Activate a user (Admin only)"""
+    """Activate a user"""
     
     try:
-        normalized_username = normalize_username(username)
+        username = normalize_username(username)
         
-        user = db.query(User).filter(User.username == normalized_username).first()
-        
+        user = db.query(User).filter(User.username == username).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -187,16 +343,11 @@ async def activate_user(
         
         return StatusResponse(
             status="success",
-            message=f"User {normalized_username} activated successfully"
+            message=f"User {username} activated successfully"
         )
         
     except HTTPException:
         raise
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -204,19 +355,49 @@ async def activate_user(
             detail=f"Failed to activate user: {str(e)}"
         )
 
-@router.post("/deactivate/{username}", response_model=StatusResponse)
+@router.post(
+    "/deactivate/{username}", 
+    response_model=StatusResponse,
+    summary="Deactivate User (Admin Only)",
+    description="""
+    Deactivate a user (remove from nostr.json but keep in database).
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    ### Difference from Remove:
+    - **Deactivate**: User stays in database but doesn't appear in nostr.json
+    - **Remove**: User is completely deleted from database
+    
+    Useful for:
+    - Temporarily suspending users
+    - Keeping user records while disabling service
+    """,
+    responses={
+        200: {
+            "description": "User deactivated successfully",
+            "model": StatusResponse
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse
+        },
+        404: {
+            "description": "User not found",
+            "model": ErrorResponse
+        }
+    }
+)
 async def deactivate_user(
     username: str,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_key)
+    _: str = Depends(verify_admin_key)
 ):
-    """Deactivate a user (Admin only)"""
+    """Deactivate a user"""
     
     try:
-        normalized_username = normalize_username(username)
+        username = normalize_username(username)
         
-        user = db.query(User).filter(User.username == normalized_username).first()
-        
+        user = db.query(User).filter(User.username == username).first()
         if not user:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -228,16 +409,11 @@ async def deactivate_user(
         
         return StatusResponse(
             status="success",
-            message=f"User {normalized_username} deactivated successfully"
+            message=f"User {username} deactivated successfully"
         )
         
     except HTTPException:
         raise
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -245,50 +421,91 @@ async def deactivate_user(
             detail=f"Failed to deactivate user: {str(e)}"
         )
 
-@router.post("/sync-usernames", response_model=StatusResponse)
-async def manual_sync_usernames(
+@router.post(
+    "/sync-usernames", 
+    response_model=StatusResponse,
+    summary="Sync Usernames from Nostr (Admin Only)",
+    description="""
+    Manually trigger username synchronization from Nostr profiles.
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    ### Process:
+    1. Queries all active users needing sync (24+ hours since last sync)
+    2. Connects to Nostr relays via WebSocket
+    3. Fetches kind:0 (profile) events for each user
+    4. Extracts `name` field from profile metadata
+    5. Updates username if different and available
+    
+    ### Automatic Sync:
+    This process also runs automatically every 15 minutes in the background
+    when `USERNAME_SYNC_ENABLED=true`.
+    
+    ### Rate Limiting:
+    - Max once per 24 hours per user
+    - Checks multiple Nostr relays for reliability
+    - Validates usernames before updating
+    """,
+    responses={
+        200: {
+            "description": "Username sync completed",
+            "model": StatusResponse
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse
+        },
+        503: {
+            "description": "Username sync disabled",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Username sync is disabled"
+                    }
+                }
+            }
+        }
+    }
+)
+async def sync_usernames(
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-    _: bool = Depends(verify_admin_key)
+    _: str = Depends(verify_admin_key)
 ):
-    """Manually trigger username synchronization (Admin only)"""
+    """Manually trigger username sync from Nostr profiles"""
     
     if not settings.USERNAME_SYNC_ENABLED:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="Username sync is disabled"
         )
     
     try:
         # Get users that need syncing
-        users_to_sync = nostr_sync_service.get_users_to_sync(db)
+        max_age = datetime.utcnow() - timedelta(hours=settings.USERNAME_SYNC_MAX_AGE_HOURS)
+        
+        users_to_sync = db.query(User).filter(
+            User.is_active == True,
+            (User.last_synced_at == None) | (User.last_synced_at < max_age)
+        ).all()
         
         if not users_to_sync:
             return StatusResponse(
                 status="success",
-                message="No users need synchronization"
+                message="No users need syncing at this time"
             )
         
-        updates_count = 0
-        errors_count = 0
-        
-        for user in users_to_sync:
-            try:
-                updated = await nostr_sync_service.sync_user_profile(user, db)
-                if updated:
-                    updates_count += 1
-            except Exception:
-                errors_count += 1
-                continue
-        
-        message = f"Sync completed: {updates_count} updated, {errors_count} errors, {len(users_to_sync)} total"
+        # Schedule sync as background task
+        background_tasks.add_task(sync_username, users_to_sync)
         
         return StatusResponse(
             status="success",
-            message=message
+            message=f"Started username sync for {len(users_to_sync)} users"
         )
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to sync usernames: {str(e)}"
+            detail=f"Failed to start username sync: {str(e)}"
         ) 
