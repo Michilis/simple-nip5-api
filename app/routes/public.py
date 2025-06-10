@@ -12,7 +12,7 @@ from app.schemas import (
     StatusResponse,
     ErrorResponse
 )
-from app.services.nip05 import normalize_username, npub_to_pubkey, validate_npub
+from app.services.nip05 import normalize_username, npub_to_pubkey, validate_npub, is_hex_pubkey
 from app.services.lnbits import lnbits_service
 from app.services.scheduler import invoice_scheduler
 from config import settings
@@ -28,72 +28,87 @@ def check_lnbits_enabled():
         )
 
 @router.post(
-    "/invoice", 
+    "/invoice",
     response_model=InvoiceResponse,
     summary="Create Lightning Invoice",
     description="""
-    Create a Lightning invoice for NIP-05 registration.
+    Create a Lightning invoice for NIP-05 identity registration.
     
-    **Lightning Mode Only** - This endpoint is only available when `LNBITS_ENABLED=true`.
-    
-    ### Process:
-    1. Validates username and npub format
-    2. Checks username availability
-    3. Creates Lightning invoice via LNbits
-    4. Schedules background payment monitoring
-    
-    ### Username Rules:
-    - Alphanumeric characters, dots, dashes, underscores only
-    - Must start with alphanumeric character
-    - 1-50 characters in length
+    ### Request Body:
+    - **username**: Desired NIP-05 username (alphanumeric, dots, dashes, underscores only)
+    - **npub**: User's nostr public key in npub (bech32) or hex format
+    - **subscription_type**: Type of subscription ("yearly" or "lifetime")
+    - **years**: Number of years for yearly subscription (1-10, ignored for lifetime)
     
     ### Subscription Types:
     - **yearly**: {yearly_price} sats per year (can specify multiple years)
-    - **lifetime**: {lifetime_price} sats
+    - **lifetime**: {lifetime_price} sats (one-time payment)
     
-    The user pays the returned `payment_request` (BOLT11 invoice) with any Lightning wallet.
-    Once paid, the user will be automatically activated and appear in `/.well-known/nostr.json`.
+    ### Response:
+    - **payment_hash**: Unique payment hash for this Lightning invoice
+    - **payment_request**: BOLT11 Lightning invoice payment request
+    - **amount_sats**: Invoice amount in satoshis
+    - **expires_at**: Invoice expiration timestamp (ISO 8601)
+    - **username**: Normalized username that will be registered
+    
+    ### Notes:
+    - Invoices expire after {expiry_minutes} minutes
+    - Username must be unique and follow NIP-05 naming rules
+    - Payment is verified automatically via webhook or polling
+    - User is activated immediately after payment confirmation
+    - Public key can be provided in either npub (bech32) or hex format
+    
+    ### Example Request (with npub):
+    ```json
+    {{
+        "username": "alice",
+        "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+        "subscription_type": "yearly",
+        "years": 2
+    }}
+    ```
+    
+    ### Example Request (with hex pubkey):
+    ```json
+    {{
+        "username": "bob",
+        "npub": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+        "subscription_type": "yearly",
+        "years": 1
+    }}
+    ```
+    
+    ### Example Response:
+    ```json
+    {{
+        "payment_hash": "d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567",
+        "payment_request": "lnbc10000n1p3xnhl2pp5d63adcc3b6d2a7c6b5a8c9f2e1d3456789abcdef0123456789abcdef01234567...",
+        "amount_sats": 2000,
+        "expires_at": "2024-01-15T14:30:00.000Z",
+        "username": "alice"
+    }}
+    ```
     """.format(
         yearly_price=settings.NIP05_YEARLY_PRICE_SATS,
-        lifetime_price=settings.NIP05_LIFETIME_PRICE_SATS
+        lifetime_price=settings.NIP05_LIFETIME_PRICE_SATS,
+        expiry_minutes=settings.INVOICE_EXPIRY_SECONDS // 60
     ),
     responses={
         200: {
-            "description": "Invoice created successfully",
+            "description": "Lightning invoice created successfully",
             "model": InvoiceResponse
         },
         400: {
-            "description": "Invalid input (bad username, npub, or subscription type)",
-            "model": ErrorResponse,
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Invalid npub format"
-                    }
-                }
-            }
+            "description": "Invalid request parameters",
+            "model": ErrorResponse
         },
         409: {
-            "description": "Username already taken or unpaid invoice exists",
-            "model": ErrorResponse,
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Username already taken"
-                    }
-                }
-            }
+            "description": "Username already taken",
+            "model": ErrorResponse
         },
         503: {
-            "description": "Lightning payments disabled (admin-only mode)",
-            "model": ErrorResponse,
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Lightning payment functionality is disabled. Contact administrator for manual registration."
-                    }
-                }
-            }
+            "description": "Lightning payment service unavailable",
+            "model": ErrorResponse
         }
     }
 )
@@ -102,7 +117,7 @@ async def create_invoice(
     background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
-    """Create a Lightning invoice for NIP-05 registration"""
+    """Create a Lightning invoice for NIP-05 identity registration"""
     
     # Check if LNbits is enabled
     check_lnbits_enabled()
@@ -111,13 +126,18 @@ async def create_invoice(
         # Validate and normalize inputs
         username = normalize_username(request.username)
         
-        if not validate_npub(request.npub):
+        # Handle both npub and hex pubkey formats
+        if is_hex_pubkey(request.npub):
+            pubkey = request.npub
+            npub = None  # We don't store npub if only hex was provided
+        elif validate_npub(request.npub):
+            pubkey = npub_to_pubkey(request.npub)
+            npub = request.npub
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid npub format"
+                detail="Invalid public key format. Must be npub (bech32) or hex format"
             )
-        
-        pubkey = npub_to_pubkey(request.npub)
         
         # Check if username is available or renewal for same user
         existing_user = db.query(User).filter(User.username == username).first()
@@ -173,7 +193,7 @@ async def create_invoice(
             amount_sats=amount_sats,
             username=username,
             pubkey=pubkey,
-            npub=request.npub,
+            npub=npub,  # This might be None if only hex was provided
             subscription_type=request.subscription_type,
             expires_at=expires_at
         )

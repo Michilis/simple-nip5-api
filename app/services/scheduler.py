@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -9,7 +9,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from app.database import SessionLocal
 from app.models import Invoice, User
 from app.services.lnbits import lnbits_service
-from app.services.nostr_sync import nostr_sync_service
+from app.services.nostr_sync import fetch_nostr_profile, sync_username
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class InvoiceScheduler:
         db = SessionLocal()
         try:
             # Get users that need syncing
-            users_to_sync = nostr_sync_service.get_users_to_sync(db)
+            users_to_sync = get_users_to_sync(db)
             
             if not users_to_sync:
                 logger.debug("No users need username sync")
@@ -105,7 +105,7 @@ class InvoiceScheduler:
                     if users_to_sync.index(user) > 0:
                         await asyncio.sleep(1)
                     
-                    updated = await nostr_sync_service.sync_user_profile(user, db)
+                    updated = await sync_user_profile(user, db)
                     if updated:
                         updates_count += 1
                         
@@ -228,3 +228,61 @@ class InvoiceScheduler:
 
 # Global scheduler instance
 invoice_scheduler = InvoiceScheduler() 
+
+def get_users_to_sync(db: Session) -> List[User]:
+    """Get users that need their profiles synced."""
+    if not settings.USERNAME_SYNC_ENABLED:
+        return []
+        
+    # Get users that haven't been synced recently
+    cutoff = datetime.utcnow() - timedelta(hours=settings.USERNAME_SYNC_MAX_AGE_HOURS)
+    return db.query(User).filter(
+        User.is_active == True,
+        (User.last_sync == None) | (User.last_sync < cutoff)
+    ).all()
+
+async def sync_user_profile(user: User, db: Session) -> bool:
+    """Sync a single user's profile from Nostr."""
+    try:
+        if not user.pubkey:
+            return False
+            
+        profile = await fetch_nostr_profile(user.pubkey)
+        if not profile:
+            return False
+            
+        if 'name' in profile and profile['name']:
+            user.username = profile['name']
+            user.last_sync = datetime.utcnow()
+            db.commit()
+            logger.info(f"Updated username for {user.pubkey} to {user.username}")
+            return True
+            
+        return False
+    except Exception as e:
+        logger.error(f"Error syncing profile for {user.pubkey}: {str(e)}")
+        return False
+
+async def run_sync_loop():
+    """Run the sync loop for user profiles."""
+    while True:
+        try:
+            if not settings.USERNAME_SYNC_ENABLED:
+                await asyncio.sleep(60)
+                continue
+                
+            db = next(get_db())
+            users = get_users_to_sync(db)
+            
+            if users:
+                await sync_username(users)
+                
+            await asyncio.sleep(settings.USERNAME_SYNC_INTERVAL_MINUTES * 60)
+            
+        except Exception as e:
+            logger.error(f"Error in sync loop: {str(e)}")
+            await asyncio.sleep(60)
+
+# Start the sync loop when the scheduler starts
+async def start_sync_loop():
+    asyncio.create_task(run_sync_loop()) 

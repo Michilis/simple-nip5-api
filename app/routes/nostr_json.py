@@ -6,10 +6,9 @@ from datetime import datetime
 from app.database import get_db
 from app.models import User
 from app.schemas import NostrJsonResponse
-from app.services.nip05 import npub_to_pubkey
 from config import settings
 
-router = APIRouter()
+router = APIRouter(tags=["public"])
 
 @router.get(
     "/.well-known/nostr.json",
@@ -81,15 +80,16 @@ async def nostr_json(
         default_relays = settings.DEFAULT_RELAYS if hasattr(settings, 'DEFAULT_RELAYS') else []
         
         for user in users:
-            # Convert npub to hex pubkey
-            hex_pubkey = npub_to_pubkey(user.npub)
-            
+            # Use the stored pubkey directly
+            if not user.pubkey:
+                continue  # Skip users without pubkey
+                
             # Add to names mapping
-            names[user.username] = hex_pubkey
+            names[user.username] = user.pubkey
             
             # Add to relays mapping if we have relays
             if default_relays:
-                relays[hex_pubkey] = default_relays
+                relays[user.pubkey] = default_relays
         
         return NostrJsonResponse(
             names=names,

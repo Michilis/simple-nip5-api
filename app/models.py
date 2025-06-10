@@ -8,15 +8,15 @@ class User(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True, nullable=False)
-    pubkey = Column(String, nullable=False)  # hex format
-    npub = Column(String, nullable=False)    # bech32 format
+    pubkey = Column(String, unique=True, index=True, nullable=False)
+    npub = Column(String, unique=True, index=True, nullable=True)  # Make npub nullable
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     last_synced_at = Column(DateTime, nullable=True)  # Track Nostr profile sync
     
     # Subscription management
     expires_at = Column(DateTime, nullable=True)  # When subscription expires
-    subscription_type = Column(String, nullable=True)  # yearly, lifetime
+    subscription_type = Column(String, nullable=True)  # 'yearly' or 'lifetime'
     
     # Relationship to invoices
     invoices = relationship("Invoice", back_populates="user")

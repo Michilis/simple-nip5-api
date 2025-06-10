@@ -1,74 +1,96 @@
 import re
 import binascii
 from typing import Dict, Optional
-from bech32 import bech32_decode, bech32_encode, convertbits
+import bech32
 
 def normalize_username(username: str) -> str:
-    """Normalize username according to NIP-05 specs"""
-    # Convert to lowercase and remove invalid characters
-    normalized = re.sub(r'[^a-z0-9._-]', '', username.lower().strip())
+    """Normalize username to lowercase and remove invalid characters"""
+    if not username:
+        raise ValueError("Username cannot be empty")
     
-    # Must start with alphanumeric
-    if not normalized or not normalized[0].isalnum():
-        raise ValueError("Username must start with alphanumeric character")
+    # Convert to lowercase
+    username = username.lower()
     
-    # Check length
-    if len(normalized) < 1 or len(normalized) > 50:
+    # Remove any characters that aren't alphanumeric, dots, dashes, or underscores
+    username = re.sub(r'[^a-z0-9._-]', '', username)
+    
+    # Ensure username starts with alphanumeric
+    if not re.match(r'^[a-z0-9]', username):
+        raise ValueError("Username must start with an alphanumeric character")
+    
+    # Ensure username is between 1 and 50 characters
+    if len(username) < 1 or len(username) > 50:
         raise ValueError("Username must be between 1 and 50 characters")
     
-    return normalized
+    return username
+
+def validate_npub(npub: str) -> bool:
+    """Validate npub format"""
+    if not npub:
+        return False
+    
+    # If it's a hex pubkey, it's valid
+    if is_hex_pubkey(npub):
+        return True
+    
+    # Must start with npub1
+    if not npub.startswith('npub1'):
+        return False
+    
+    try:
+        # Try to decode
+        _, data = bech32.bech32_decode(npub)
+        return data is not None
+    except:
+        return False
+
+def is_hex_pubkey(pubkey: str) -> bool:
+    """Check if string is a valid hex pubkey"""
+    if not pubkey:
+        return False
+    
+    # Must be 64 characters of hex
+    if len(pubkey) != 64:
+        return False
+    
+    try:
+        int(pubkey, 16)
+        return True
+    except ValueError:
+        return False
 
 def npub_to_pubkey(npub: str) -> str:
     """Convert npub (bech32) to hex pubkey"""
+    if not npub:
+        raise ValueError("Npub cannot be empty")
+    
+    # If it's already a hex pubkey, return it
+    if is_hex_pubkey(npub):
+        return npub
+    
+    # Must start with npub1
     if not npub.startswith('npub1'):
         raise ValueError("Invalid npub format")
     
     try:
-        hrp, data = bech32_decode(npub)
-        if hrp != 'npub' or data is None:
-            raise ValueError("Invalid npub format")
-        
-        # Convert from 5-bit to 8-bit
-        decoded = convertbits(data, 5, 8, False)
-        if decoded is None or len(decoded) != 32:
-            raise ValueError("Invalid npub data")
+        # Decode bech32
+        _, data = bech32.bech32_decode(npub)
+        if not data:
+            raise ValueError("Invalid bech32 encoding")
         
         # Convert to hex
-        pubkey_hex = bytes(decoded).hex()
-        return pubkey_hex
+        pubkey = ''.join([f'{x:02x}' for x in data])
+        return pubkey
     except Exception as e:
         raise ValueError(f"Failed to decode npub: {str(e)}")
 
-def pubkey_to_npub(pubkey_hex: str) -> str:
-    """Convert hex pubkey to npub (bech32)"""
-    try:
-        # Validate hex
-        if len(pubkey_hex) != 64:
-            raise ValueError("Pubkey must be 64 hex characters")
-        
-        pubkey_bytes = bytes.fromhex(pubkey_hex)
-        
-        # Convert to 5-bit
-        data = convertbits(pubkey_bytes, 8, 5)
-        if data is None:
-            raise ValueError("Failed to convert pubkey")
-        
-        # Encode as bech32
-        npub = bech32_encode('npub', data)
-        if npub is None:
-            raise ValueError("Failed to encode npub")
-        
-        return npub
-    except Exception as e:
-        raise ValueError(f"Failed to encode npub: {str(e)}")
-
-def validate_npub(npub: str) -> bool:
-    """Validate npub format and checksum"""
-    try:
-        npub_to_pubkey(npub)
-        return True
-    except:
-        return False
+def pubkey_to_npub(pubkey: str) -> str:
+    """Convert hex pubkey to npub"""
+    if not is_hex_pubkey(pubkey):
+        raise ValueError("Invalid pubkey format")
+    
+    # Add 'npub' prefix
+    return f"npub{pubkey}"
 
 def is_username_available(username: str, existing_users: list) -> bool:
     """Check if username is available"""

@@ -13,7 +13,7 @@ class InvoiceRequest(BaseModel):
     )
     npub: str = Field(
         ..., 
-        description="User's nostr public key in npub (bech32) format",
+        description="User's nostr public key in npub (bech32) or hex format",
         example="npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
     )
     subscription_type: str = Field(
@@ -80,80 +80,24 @@ class InvoiceResponse(BaseModel):
 
 # Admin schemas
 class AddUserRequest(BaseModel):
-    username: str = Field(
-        ..., 
-        min_length=1, 
-        max_length=50,
-        description="Username to add (alphanumeric, dots, dashes, underscores only)",
-        example="bob"
-    )
-    npub: str = Field(
-        ..., 
-        description="User's nostr public key in npub (bech32) format",
-        example="npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
-    )
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "username": "bob",
-                "npub": "npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
-            }
-        }
+    username: Optional[str] = None
+    npub: str
 
 class RemoveUserRequest(BaseModel):
-    username: str = Field(
-        ..., 
-        description="Username to remove from the system",
-        example="bob"
-    )
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "username": "bob"
-            }
-        }
+    username: str
 
 class UserResponse(BaseModel):
-    id: int = Field(..., description="User's unique database ID", example=123)
-    username: str = Field(..., description="User's NIP-05 username", example="alice")
-    pubkey: str = Field(
-        ..., 
-        description="User's nostr public key in hex format",
-        example="abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
-    )
-    npub: str = Field(
-        ..., 
-        description="User's nostr public key in npub (bech32) format",
-        example="npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
-    )
-    is_active: bool = Field(..., description="Whether the user is active and appears in nostr.json", example=True)
-    subscription_type: Optional[str] = Field(None, description="Subscription type (yearly/lifetime)", example="yearly")
-    expires_at: Optional[datetime] = Field(
-        None, 
-        description="Subscription expiration timestamp (null for lifetime)",
-        example="2025-01-01T12:00:00.000Z"
-    )
-    created_at: datetime = Field(
-        ..., 
-        description="User creation timestamp (ISO 8601)",
-        example="2024-01-01T12:00:00.000Z"
-    )
-    
+    id: int
+    username: str
+    pubkey: str
+    npub: Optional[str] = None
+    is_active: bool
+    subscription_type: Optional[str] = None
+    expires_at: Optional[datetime] = None
+    created_at: datetime
+
     class Config:
-        json_schema_extra = {
-            "example": {
-                "id": 123,
-                "username": "alice",
-                "pubkey": "abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
-                "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
-                "is_active": True,
-                "subscription_type": "yearly",
-                "expires_at": "2025-01-01T12:00:00.000Z",
-                "created_at": "2024-01-01T12:00:00.000Z"
-            }
-        }
+        from_attributes = True
 
 # Webhook schemas
 class WebhookPayload(BaseModel):
@@ -221,45 +165,12 @@ class NostrJsonResponse(BaseModel):
     
 # Status schemas
 class StatusResponse(BaseModel):
-    status: str = Field(
-        ...,
-        description="Operation status",
-        example="success"
-    )
-    message: str = Field(
-        ...,
-        description="Human-readable status message",
-        example="User alice added successfully"
-    )
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "status": "success",
-                "message": "User alice added successfully"
-            }
-        }
+    status: str
+    message: str
 
 # Error schemas
 class ErrorResponse(BaseModel):
-    error: str = Field(
-        ...,
-        description="Error type or category",
-        example="ValidationError"
-    )
-    detail: Optional[str] = Field(
-        None,
-        description="Detailed error message",
-        example="Username must start with alphanumeric character"
-    )
-    
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "error": "ValidationError",
-                "detail": "Username must start with alphanumeric character"
-            }
-        }
+    detail: str
 
 # Health check schemas
 class HealthResponse(BaseModel):
@@ -284,4 +195,13 @@ class HealthResponse(BaseModel):
             "webhook": "/api/public/webhook/paid"
         }
     )
-    documentation: str = Field(..., description="API documentation URL", example="/api-docs") 
+    documentation: str = Field(..., description="API documentation URL", example="/api-docs")
+
+class UserCreate(BaseModel):
+    pubkey: str
+    username: Optional[str] = None
+    is_active: bool = True
+
+class UserUpdate(BaseModel):
+    username: Optional[str] = None
+    is_active: Optional[bool] = None 

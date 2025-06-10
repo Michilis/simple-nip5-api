@@ -1,11 +1,15 @@
 import os
 from typing import Optional, List
 from dotenv import load_dotenv
+from pydantic_settings import BaseSettings
+from pydantic import ConfigDict, field_validator
 
 # Load environment variables from .env file
 load_dotenv()
 
-class Settings:
+class Settings(BaseSettings):
+    model_config = ConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
+    
     # Admin API security
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "your-secret-admin-key-here")
     
@@ -40,13 +44,23 @@ class Settings:
     USERNAME_SYNC_ENABLED: bool = os.getenv("USERNAME_SYNC_ENABLED", "true").lower() == "true"
     USERNAME_SYNC_INTERVAL_MINUTES: int = int(os.getenv("USERNAME_SYNC_INTERVAL_MINUTES", "15"))
     USERNAME_SYNC_MAX_AGE_HOURS: int = int(os.getenv("USERNAME_SYNC_MAX_AGE_HOURS", "24"))
-    NOSTR_RELAYS: str = os.getenv("NOSTR_RELAYS", "wss://relay.azzamo.net,wss://relay.damus.io,wss://primal.net")
+    
+    # Nostr relays configuration
+    NOSTR_RELAYS: str = os.getenv(
+        "NOSTR_RELAYS",
+        "wss://relay.damus.io,wss://nostr.bitcoiner.social,wss://nostr.fmt.wiz.biz,wss://relay.nostr.band"
+    )
     
     # Default relays for NIP-05
-    DEFAULT_RELAYS: List[str] = os.getenv(
+    DEFAULT_RELAYS: str = os.getenv(
         "NIP05_DEFAULT_RELAYS",
         "wss://relay.damus.io,wss://nostr.bitcoiner.social,wss://nostr.fmt.wiz.biz"
-    ).split(",")
+    )
+
+    @field_validator("NOSTR_RELAYS", "DEFAULT_RELAYS")
+    @classmethod
+    def split_relays(cls, v: str) -> List[str]:
+        return [relay.strip() for relay in v.split(",") if relay.strip()]
 
 # Global settings instance
 settings = Settings() 

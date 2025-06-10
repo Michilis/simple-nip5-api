@@ -84,15 +84,11 @@ All endpoints return JSON responses with consistent error handling.
         tags=[
             {
                 "name": "public",
-                "description": "Public endpoints for Lightning payment registration"
+                "description": "Public endpoints including NIP-05 identity verification and Lightning payment registration"
             },
             {
                 "name": "admin", 
                 "description": "Admin endpoints for user management (requires API key)"
-            },
-            {
-                "name": "nostr",
-                "description": "NIP-05 identity resolution endpoint"
             },
             {
                 "name": "health",

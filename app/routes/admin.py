@@ -2,20 +2,25 @@ from fastapi import APIRouter, Depends, HTTPException, status, Header, Query, Ba
 from sqlalchemy.orm import Session
 from typing import List, Optional
 from datetime import datetime, timedelta
+import asyncio
+import logging
 
 from app.database import get_db
-from app.models import User
+from app.models import User, Invoice
 from app.schemas import (
     AddUserRequest,
     RemoveUserRequest,
     UserResponse,
     StatusResponse,
-    ErrorResponse
+    ErrorResponse,
+    UserCreate,
+    UserUpdate
 )
-from app.services.nip05 import normalize_username, npub_to_pubkey, validate_npub
-from app.services.nostr_sync import sync_username
+from app.services.nip05 import normalize_username, npub_to_pubkey, validate_npub, is_hex_pubkey
+from app.services.nostr_sync import fetch_nostr_profile, sync_username
 from config import settings
 
+logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/whitelist", tags=["admin"])
 
 def verify_admin_key(x_api_key: str = Header(..., description="Admin API key for authentication")):
@@ -62,30 +67,49 @@ def find_user_by_identifier(db: Session, identifier: str) -> Optional[User]:
     
     return None
 
+async def get_username_from_nostr(pubkey: str) -> str:
+    """Get username from Nostr profile or return a fallback."""
+    try:
+        profile = await fetch_nostr_profile(pubkey)
+        if profile and 'name' in profile and profile['name']:
+            return profile['name']
+    except Exception as e:
+        logger.error(f"Error fetching Nostr profile: {str(e)}")
+    
+    # Fallback to first 8 chars of pubkey
+    return f"user_{pubkey[:8]}"
+
 @router.post(
-    "/add", 
+    "/add",
     response_model=StatusResponse,
-    summary="Add User (Admin Only)",
+    summary="Add User to Whitelist",
     description="""
-    Manually add a user to the NIP-05 whitelist.
+    Add a user to the NIP-05 whitelist.
     
-    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    ### Request Body:
+    - **username**: Optional username. If not provided, will be fetched from Nostr profile
+    - **npub**: User's nostr public key in npub (bech32) or hex format
     
-    ### Process:
-    1. Validates username and npub format
-    2. Checks username availability
-    3. Adds user to database
-    4. User immediately appears in `/.well-known/nostr.json`
+    ### Notes:
+    - If username is not provided, it will be fetched from the user's Nostr profile
+    - If profile fetch fails, first 16 characters of pubkey will be used as username
+    - Public key can be provided in either npub (bech32) or hex format
+    - User will appear in `/.well-known/nostr.json` immediately
     
-    ### Use Cases:
-    - **Admin-Only Mode**: Primary method for adding users
-    - **Lightning Mode**: Manual overrides and free additions
-    - **Testing**: Add test users without payment
+    ### Example Request (with username):
+    ```json
+    {
+        "username": "alice",
+        "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
+    }
+    ```
     
-    ### Username Rules:
-    - Alphanumeric characters, dots, dashes, underscores only
-    - Must start with alphanumeric character
-    - 1-50 characters in length
+    ### Example Request (without username):
+    ```json
+    {
+        "npub": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890"
+    }
+    ```
     """,
     responses={
         200: {
@@ -93,79 +117,78 @@ def find_user_by_identifier(db: Session, identifier: str) -> Optional[User]:
             "model": StatusResponse
         },
         400: {
-            "description": "Invalid input (bad username or npub format)",
-            "model": ErrorResponse,
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Invalid npub format"
-                    }
-                }
-            }
-        },
-        401: {
-            "description": "Invalid or missing API key",
-            "model": ErrorResponse,
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Invalid API key"
-                    }
-                }
-            }
+            "description": "Invalid request parameters",
+            "model": ErrorResponse
         },
         409: {
-            "description": "Username already exists",
-            "model": ErrorResponse,
-            "content": {
-                "application/json": {
-                    "example": {
-                        "detail": "Username already exists"
-                    }
-                }
-            }
+            "description": "Username already taken",
+            "model": ErrorResponse
+        },
+        401: {
+            "description": "Invalid API key",
+            "model": ErrorResponse
         }
     }
 )
 async def add_user(
     request: AddUserRequest,
     db: Session = Depends(get_db),
-    _: str = Depends(verify_admin_key)
+    _: None = Depends(verify_admin_key)
 ):
     """Add a user to the NIP-05 whitelist"""
     
     try:
-        # Validate and normalize inputs
-        username = normalize_username(request.username)
+        # Handle both npub and hex pubkey formats
+        if is_hex_pubkey(request.npub):
+            pubkey = request.npub
+            npub = None  # We don't store npub if only hex was provided
+        else:
+            try:
+                pubkey = npub_to_pubkey(request.npub)
+                npub = request.npub
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid public key format. Must be npub (bech32) or hex format"
+                )
         
-        if not validate_npub(request.npub):
+        # Check if pubkey is already registered
+        existing_pubkey = db.query(User).filter(User.pubkey == pubkey).first()
+        if existing_pubkey:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid npub format"
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Public key already registered"
             )
         
-        pubkey = npub_to_pubkey(request.npub)
+        # Get username (either from request or Nostr profile)
+        if request.username:
+            username = normalize_username(request.username)
+        else:
+            username = await get_username_from_nostr(pubkey)
         
-        # Check if username already exists
+        # Check if username is already taken
         existing_user = db.query(User).filter(User.username == username).first()
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail="Username already exists"
+                detail="Username already taken"
             )
         
         # Create new user
         new_user = User(
             username=username,
             pubkey=pubkey,
-            npub=request.npub,
+            npub=npub,
             is_active=True,
-            subscription_type="lifetime",  # Manually added users get lifetime subscription
-            expires_at=None  # Lifetime never expires
+            created_at=datetime.utcnow()
         )
         
         db.add(new_user)
         db.commit()
+        
+        # Sync username in background
+        background_tasks = BackgroundTasks()
+        background_tasks.add_task(sync_username, [new_user])
         
         return StatusResponse(
             status="success",
@@ -174,11 +197,6 @@ async def add_user(
         
     except HTTPException:
         raise
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -264,11 +282,9 @@ async def remove_user(
 @router.get(
     "/users", 
     response_model=List[UserResponse],
-    summary="List Users (Admin Only)",
+    summary="List Users",
     description="""
     List all users in the system with optional filtering.
-    
-    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
     
     ### Query Parameters:
     - **active_only**: If `true`, only returns active users (those appearing in nostr.json)
@@ -288,50 +304,237 @@ async def remove_user(
         200: {
             "description": "List of users",
             "model": List[UserResponse]
-        },
-        401: {
-            "description": "Invalid or missing API key",
-            "model": ErrorResponse
         }
-    }
+    },
+    tags=["public"]
 )
 async def list_users(
     active_only: Optional[bool] = Query(False, description="Only return active users"),
     username: Optional[str] = Query(None, description="Filter by username (partial match)"),
-    db: Session = Depends(get_db),
-    _: str = Depends(verify_admin_key)
+    db: Session = Depends(get_db)
 ):
-    """List users with optional filtering"""
-    
+    """List all users with optional filtering"""
     try:
         query = db.query(User)
         
+        # Apply filters
         if active_only:
             query = query.filter(User.is_active == True)
-        
         if username:
-            query = query.filter(User.username.contains(username))
+            query = query.filter(User.username.ilike(f"%{username}%"))
         
-        users = query.order_by(User.created_at.desc()).all()
+        # Get users
+        users = query.all()
         
-        return [
-            UserResponse(
-                id=user.id,
-                username=user.username,
-                pubkey=user.pubkey,
-                npub=user.npub,
-                is_active=user.is_active,
-                subscription_type=user.subscription_type,
-                expires_at=user.expires_at,
-                created_at=user.created_at
-            )
-            for user in users
-        ]
+        return users
         
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to list users: {str(e)}"
+        )
+
+@router.get(
+    "/users/{pubkey}",
+    response_model=UserResponse,
+    summary="Get User Details",
+    description="""
+    Get detailed information about a specific user.
+    
+    ### Path Parameters:
+    - **pubkey**: User's public key in hex format
+    
+    ### Response Fields:
+    - **id**: Database ID
+    - **username**: NIP-05 username
+    - **pubkey**: Hex format public key
+    - **npub**: Bech32 format public key
+    - **is_active**: Whether user appears in nostr.json
+    - **subscription_type**: Subscription type
+    - **expires_at**: Subscription expiration date
+    - **created_at**: User creation timestamp
+    """,
+    responses={
+        200: {
+            "description": "User details",
+            "model": UserResponse
+        },
+        404: {
+            "description": "User not found",
+            "model": ErrorResponse
+        }
+    },
+    tags=["public"]
+)
+async def get_user(
+    pubkey: str,
+    db: Session = Depends(get_db)
+):
+    """Get user details by public key"""
+    try:
+        user = db.query(User).filter(User.pubkey == pubkey).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        return user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get user: {str(e)}"
+        )
+
+@router.put(
+    "/users/{pubkey}",
+    response_model=UserResponse,
+    summary="Update User (Admin Only)",
+    description="""
+    Update a user's details.
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    ### Path Parameters:
+    - **pubkey**: User's public key in hex format
+    
+    ### Request Body:
+    - **username**: Optional new username
+    - **is_active**: Optional active status
+    
+    ### Notes:
+    - Only provided fields will be updated
+    - Username must be unique if changed
+    """,
+    responses={
+        200: {
+            "description": "User updated successfully",
+            "model": UserResponse
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse
+        },
+        404: {
+            "description": "User not found",
+            "model": ErrorResponse
+        },
+        409: {
+            "description": "Username already taken",
+            "model": ErrorResponse
+        }
+    }
+)
+async def update_user(
+    pubkey: str,
+    user_update: UserUpdate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_admin_key)
+):
+    """Update user details (admin only)"""
+    try:
+        user = db.query(User).filter(User.pubkey == pubkey).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Update fields if provided
+        if user_update.username is not None:
+            # Check if new username is taken
+            existing = db.query(User).filter(User.username == user_update.username).first()
+            if existing and existing.id != user.id:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Username already taken"
+                )
+            user.username = user_update.username
+            
+        if user_update.is_active is not None:
+            user.is_active = user_update.is_active
+        
+        db.commit()
+        
+        # Sync username in background if changed
+        if user_update.username is not None:
+            background_tasks.add_task(sync_username, [user])
+        
+        return user
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update user: {str(e)}"
+        )
+
+@router.delete(
+    "/users/{pubkey}",
+    response_model=StatusResponse,
+    summary="Delete User (Admin Only)",
+    description="""
+    Delete a user from the system.
+    
+    **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
+    
+    ### Path Parameters:
+    - **pubkey**: User's public key in hex format
+    
+    ### Notes:
+    - This completely removes the user from the system
+    - Any paid invoices for this username will become invalid
+    - The username becomes available for re-registration
+    """,
+    responses={
+        200: {
+            "description": "User deleted successfully",
+            "model": StatusResponse
+        },
+        401: {
+            "description": "Invalid or missing API key",
+            "model": ErrorResponse
+        },
+        404: {
+            "description": "User not found",
+            "model": ErrorResponse
+        }
+    }
+)
+async def delete_user(
+    pubkey: str,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_admin_key)
+):
+    """Delete a user (admin only)"""
+    try:
+        user = db.query(User).filter(User.pubkey == pubkey).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        db.delete(user)
+        db.commit()
+        
+        return StatusResponse(
+            status="success",
+            message=f"User {user.username} deleted successfully"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete user: {str(e)}"
         )
 
 @router.post(
@@ -557,4 +760,37 @@ async def sync_usernames(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to start username sync: {str(e)}"
-        ) 
+        )
+
+@router.post("/users", response_model=UserResponse)
+async def create_user(
+    user: UserCreate,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    _: str = Depends(verify_admin_key)
+):
+    """Create a new user (admin only)."""
+    # Check if user already exists
+    existing_user = db.query(User).filter(User.pubkey == user.pubkey).first()
+    if existing_user:
+        raise HTTPException(status_code=400, detail="User already exists")
+    
+    # Get username from Nostr if not provided
+    username = user.username
+    if not username:
+        username = await get_username_from_nostr(user.pubkey)
+    
+    # Create new user
+    db_user = User(
+        pubkey=user.pubkey,
+        username=username,
+        is_active=True
+    )
+    db.add(db_user)
+    db.commit()
+    db.refresh(db_user)
+    
+    # Sync username in background
+    background_tasks.add_task(sync_username, [db_user])
+    
+    return db_user 
