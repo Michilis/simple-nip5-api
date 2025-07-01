@@ -13,6 +13,11 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
+# Import DM service (but avoid circular import)
+def get_dm_service():
+    from app.services.nostr_dm import nostr_dm_service
+    return nostr_dm_service
+
 class NostrSyncService:
     def __init__(self):
         self.relays = [relay.strip() for relay in settings.NOSTR_RELAYS.split(',') if relay.strip()]
@@ -168,6 +173,19 @@ class NostrSyncService:
                 db.commit()
                 
                 logger.info(f"Updated username: '{old_username}' → '{new_username}'")
+                
+                # Send DM notification for username update
+                try:
+                    dm_service = get_dm_service()
+                    await dm_service.send_dm(
+                        recipient_pubkey=user.pubkey,
+                        message_type="username_updated",
+                        old_username=old_username,
+                        new_username=new_username
+                    )
+                except Exception as dm_error:
+                    logger.warning(f"Failed to send username update DM: {str(dm_error)}")
+                
                 return True
             else:
                 # Username unchanged, just update sync timestamp
@@ -188,13 +206,15 @@ class NostrSyncService:
         
         cutoff_time = datetime.utcnow() - timedelta(hours=settings.USERNAME_SYNC_MAX_AGE_HOURS)
         
-        # Query users that need syncing
+        # Query users that need syncing, excluding those with manually set usernames
         users = db.query(User).filter(
             User.is_active == True,  # Only sync active users
+            User.username_manual != True,  # Exclude users with manually set usernames
             (User.last_synced_at.is_(None)) |  # Never synced
             (User.last_synced_at < cutoff_time)  # Not synced recently
         ).all()
         
+        logger.debug(f"Found {len(users)} users needing sync (excluding manual usernames)")
         return users
 
 # Global service instance

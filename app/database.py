@@ -1,7 +1,10 @@
-from sqlalchemy import create_engine, Column, DateTime, String, text
+from sqlalchemy import create_engine, Column, DateTime, String, text, inspect
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session
 from config import settings
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Create SQLAlchemy engine
 engine = create_engine(
@@ -23,42 +26,200 @@ def get_db() -> Session:
     finally:
         db.close()
 
-# Create all tables
-def create_tables():
-    """Create all tables and run migrations"""
-    Base.metadata.create_all(bind=engine)
-    
-    # Run migration for subscription columns
-    migrate_subscription_columns()
+def get_table_columns(conn, table_name: str) -> list:
+    """Get list of column names for a table"""
+    try:
+        if "sqlite" in settings.DATABASE_URL:
+            # SQLite specific query
+            result = conn.execute(text(f"PRAGMA table_info({table_name})"))
+            columns = [row[1] for row in result]  # Column name is at index 1
+            return columns
+        else:
+            # PostgreSQL/MySQL compatible approach
+            inspector = inspect(engine)
+            columns = [col['name'] for col in inspector.get_columns(table_name)]
+            return columns
+    except Exception as e:
+        logger.debug(f"Error getting columns for {table_name}: {e}")
+        return []
 
-def migrate_subscription_columns():
-    """Add subscription columns to existing users table if they don't exist"""
+def table_exists(conn, table_name: str) -> bool:
+    """Check if a table exists"""
+    try:
+        if "sqlite" in settings.DATABASE_URL:
+            result = conn.execute(text(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name=:table_name"
+            ), {"table_name": table_name})
+            return result.fetchone() is not None
+        else:
+            inspector = inspect(engine)
+            return table_name in inspector.get_table_names()
+    except Exception as e:
+        logger.error(f"Error checking if table {table_name} exists: {e}")
+        return False
+
+def add_column_if_not_exists(conn, table_name: str, column_name: str, column_definition: str):
+    """Add a column to a table if it doesn't already exist"""
+    try:
+        columns = get_table_columns(conn, table_name)
+        if column_name not in columns:
+            sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"
+            conn.execute(text(sql))
+            logger.info(f"Added {column_name} column to {table_name} table")
+            return True
+        else:
+            logger.debug(f"Column {column_name} already exists in {table_name}")
+            return False
+    except Exception as e:
+        if "readonly database" in str(e).lower():
+            logger.error(f"Cannot add column {column_name} to {table_name}: Database is read-only. Please fix database permissions and restart.")
+        else:
+            logger.error(f"Error adding column {column_name} to {table_name}: {e}")
+        raise
+
+def run_database_migrations():
+    """Run all database migrations"""
+    migration_count = 0
+    
     try:
         # Create a connection to execute raw SQL
         with engine.connect() as conn:
-            # Check if columns exist in users table
-            result = conn.execute(text("SELECT * FROM users LIMIT 1"))
-            columns = result.keys()
+            # Start a transaction
+            trans = conn.begin()
             
-            # Add missing columns to users table
-            if 'expires_at' not in columns:
-                conn.execute(text("ALTER TABLE users ADD COLUMN expires_at DATETIME;"))
-                print("Added expires_at column to users table")
+            try:
+                logger.info("Running database migrations...")
                 
-            if 'subscription_type' not in columns:
-                conn.execute(text("ALTER TABLE users ADD COLUMN subscription_type VARCHAR;"))
-                print("Added subscription_type column to users table")
-            
-            # Check if columns exist in invoices table
-            result = conn.execute(text("SELECT * FROM invoices LIMIT 1"))
-            columns = result.keys()
-            
-            # Add missing columns to invoices table
-            if 'subscription_type' not in columns:
-                conn.execute(text("ALTER TABLE invoices ADD COLUMN subscription_type VARCHAR;"))
-                print("Added subscription_type column to invoices table")
-            
-            conn.commit()
+                # Check if users table exists
+                if table_exists(conn, "users"):
+                    # Add missing columns to users table
+                    if add_column_if_not_exists(conn, "users", "expires_at", "DATETIME"):
+                        migration_count += 1
+                    
+                    if add_column_if_not_exists(conn, "users", "subscription_type", "VARCHAR"):
+                        migration_count += 1
+                    
+                    if add_column_if_not_exists(conn, "users", "note", "VARCHAR"):
+                        migration_count += 1
+                    
+                    if add_column_if_not_exists(conn, "users", "username_manual", "BOOLEAN DEFAULT FALSE"):
+                        migration_count += 1
+                else:
+                    logger.info("Users table does not exist yet - will be created by SQLAlchemy")
+                
+                # Check if invoices table exists
+                if table_exists(conn, "invoices"):
+                    # Add missing columns to invoices table
+                    if add_column_if_not_exists(conn, "invoices", "subscription_type", "VARCHAR"):
+                        migration_count += 1
+                else:
+                    logger.info("Invoices table does not exist yet - will be created by SQLAlchemy")
+                
+                # Commit the transaction
+                trans.commit()
+                
+                if migration_count > 0:
+                    logger.info(f"Database migrations completed: {migration_count} columns added")
+                else:
+                    logger.info("Database schema is up to date")
+                    
+            except Exception as e:
+                # Rollback on error
+                trans.rollback()
+                logger.error(f"Database migration failed, rolling back: {e}")
+                raise
                 
     except Exception as e:
-        print(f"Migration error (this may be normal for new installations): {e}") 
+        logger.error(f"Database migration error: {e}")
+        raise
+
+def check_database_writability():
+    """Check if the database is writable"""
+    try:
+        with engine.connect() as conn:
+            # Try a simple write operation
+            conn.execute(text("CREATE TABLE IF NOT EXISTS _write_test (id INTEGER)"))
+            conn.execute(text("DROP TABLE IF EXISTS _write_test"))
+            conn.commit()
+            return True
+    except Exception as e:
+        if "readonly database" in str(e).lower():
+            logger.error("Database is read-only. Please check file permissions:")
+            if "sqlite" in settings.DATABASE_URL:
+                db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+                logger.error(f"  Database file: {db_path}")
+                logger.error(f"  Run: sudo chown $(whoami):$(whoami) {db_path}")
+                logger.error(f"  Run: sudo chmod 664 {db_path}")
+        return False
+
+def verify_database_schema():
+    """Verify that the database schema matches the expected structure"""
+    try:
+        with engine.connect() as conn:
+            # Check users table
+            if table_exists(conn, "users"):
+                user_columns = get_table_columns(conn, "users")
+                required_user_columns = [
+                    'id', 'username', 'pubkey', 'npub', 'is_active', 
+                    'created_at', 'last_synced_at', 'expires_at', 
+                    'subscription_type', 'note', 'username_manual'
+                ]
+                
+                missing_columns = [col for col in required_user_columns if col not in user_columns]
+                if missing_columns:
+                    logger.error(f"Missing columns in users table: {missing_columns}")
+                    return False
+                else:
+                    logger.info("Users table schema verified successfully")
+            
+            # Check invoices table
+            if table_exists(conn, "invoices"):
+                invoice_columns = get_table_columns(conn, "invoices")
+                required_invoice_columns = [
+                    'id', 'payment_hash', 'payment_request', 'amount_sats',
+                    'status', 'username', 'pubkey', 'npub', 'subscription_type',
+                    'poll_attempts', 'next_poll_time', 'created_at', 
+                    'paid_at', 'expires_at', 'user_id'
+                ]
+                
+                missing_columns = [col for col in required_invoice_columns if col not in invoice_columns]
+                if missing_columns:
+                    logger.error(f"Missing columns in invoices table: {missing_columns}")
+                    return False
+                else:
+                    logger.info("Invoices table schema verified successfully")
+            
+            return True
+            
+    except Exception as e:
+        logger.error(f"Database schema verification failed: {e}")
+        return False
+
+# Create all tables
+def create_tables():
+    """Create all tables and run migrations"""
+    try:
+        logger.info("Creating database tables...")
+        
+        # Create tables from SQLAlchemy models
+        Base.metadata.create_all(bind=engine)
+        logger.info("SQLAlchemy tables created successfully")
+        
+        # Run migrations for additional columns
+        run_database_migrations()
+        
+        # Verify schema
+        if verify_database_schema():
+            logger.info("Database initialization completed successfully")
+        else:
+            raise Exception("Database schema verification failed")
+            
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+        raise
+
+# Legacy function name for backward compatibility
+def migrate_subscription_columns():
+    """Legacy function - use create_tables() instead"""
+    logger.warning("migrate_subscription_columns() is deprecated, use create_tables() instead")
+    run_database_migrations() 

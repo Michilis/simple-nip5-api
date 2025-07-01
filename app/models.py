@@ -16,7 +16,13 @@ class User(Base):
     
     # Subscription management
     expires_at = Column(DateTime, nullable=True)  # When subscription expires
-    subscription_type = Column(String, nullable=True)  # yearly, lifetime
+    subscription_type = Column(String, nullable=True)  # yearly, lifetime, whitelist
+    
+    # Admin notes (for whitelist entries)
+    note = Column(String, nullable=True)  # Optional admin note
+    
+    # Manual username management
+    username_manual = Column(Boolean, default=False)  # True if username was set manually
     
     # Relationship to invoices
     invoices = relationship("Invoice", back_populates="user")
