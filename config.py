@@ -45,7 +45,7 @@ class Settings:
     DOMAIN: str = os.getenv("DOMAIN", "nip05.yourdomain.com")
     
     # Webhook URL for LNbits callbacks
-    WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "http://localhost:8000/api/public/webhook/paid")
+    WEBHOOK_URL: str = os.getenv("WEBHOOK_URL", "http://localhost:8000/api/webhook/paid")
     
     # Polling configuration
     POLL_INITIAL_INTERVAL: int = int(os.getenv("POLL_INITIAL_INTERVAL", "60"))  # 1 minute

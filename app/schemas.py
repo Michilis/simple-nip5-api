@@ -361,8 +361,8 @@ class HealthResponse(BaseModel):
         description="Available API endpoints based on enabled features",
         example={
             "nostr_json": "/.well-known/nostr.json",
-            "create_invoice": "/api/public/invoice",
-            "webhook": "/api/public/webhook/paid"
+                    "create_invoice": "/api/invoice",
+        "webhook": "/api/webhook/paid"
         }
     )
     documentation: str = Field(..., description="API documentation URL", example="/api-docs") 

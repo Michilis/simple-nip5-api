@@ -19,7 +19,7 @@ from app.services.lnbits import lnbits_service
 from app.services.scheduler import invoice_scheduler
 from config import settings
 
-router = APIRouter(prefix="/api/public", tags=["public"])
+router = APIRouter(prefix="/api", tags=["public"])
 
 def check_lnbits_enabled():
     """Check if LNbits functionality is enabled"""
@@ -232,7 +232,7 @@ async def create_invoice(
     Configure the webhook URL in your LNbits settings.
     
     ### Webhook URL Format:
-    `https://yourdomain.com/api/public/webhook/paid`
+    `https://yourdomain.com/api/webhook/paid`
     """,
     responses={
         200: {
