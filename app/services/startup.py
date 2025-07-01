@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from typing import Dict, Any
 
-from app.database import create_tables, verify_database_schema, get_table_columns, table_exists, engine
+from app.database import create_tables, verify_database_schema, get_table_columns, table_exists, engine, check_database_writability
 from app.services.whitelist import whitelist_service
 from config import settings
 
@@ -30,6 +30,11 @@ class StartupManager:
         # Check 1: Database Creation and Migration
         try:
             logger.info("1. Checking database...")
+            
+            # First check if database is writable
+            if not check_database_writability():
+                raise Exception("Database is not writable - please fix file permissions")
+            
             create_tables()
             self.startup_checks["database"] = True
             logger.info("✓ Database initialized successfully")
@@ -114,10 +119,10 @@ class StartupManager:
         
         # Check Nostr configuration if DM enabled
         if settings.NOSTR_DM_ENABLED:
-            if not settings.NOSTR_PRIVATE_KEY:
-                errors.append("NOSTR_PRIVATE_KEY required when NOSTR_DM_ENABLED=true")
-            if not settings.NOSTR_RELAYS:
-                errors.append("NOSTR_RELAYS required when NOSTR_DM_ENABLED=true")
+            if not settings.NOSTR_DM_PRIVATE_KEY:
+                errors.append("NOSTR_DM_PRIVATE_KEY required when NOSTR_DM_ENABLED=true")
+            if not settings.NOSTR_DM_RELAYS:
+                errors.append("NOSTR_DM_RELAYS required when NOSTR_DM_ENABLED=true")
         
         # Check if database file directory exists (for SQLite)
         if "sqlite" in settings.DATABASE_URL:

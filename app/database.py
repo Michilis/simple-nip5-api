@@ -71,7 +71,10 @@ def add_column_if_not_exists(conn, table_name: str, column_name: str, column_def
             logger.debug(f"Column {column_name} already exists in {table_name}")
             return False
     except Exception as e:
-        logger.error(f"Error adding column {column_name} to {table_name}: {e}")
+        if "readonly database" in str(e).lower():
+            logger.error(f"Cannot add column {column_name} to {table_name}: Database is read-only. Please fix database permissions and restart.")
+        else:
+            logger.error(f"Error adding column {column_name} to {table_name}: {e}")
         raise
 
 def run_database_migrations():
@@ -129,6 +132,25 @@ def run_database_migrations():
     except Exception as e:
         logger.error(f"Database migration error: {e}")
         raise
+
+def check_database_writability():
+    """Check if the database is writable"""
+    try:
+        with engine.connect() as conn:
+            # Try a simple write operation
+            conn.execute(text("CREATE TABLE IF NOT EXISTS _write_test (id INTEGER)"))
+            conn.execute(text("DROP TABLE IF EXISTS _write_test"))
+            conn.commit()
+            return True
+    except Exception as e:
+        if "readonly database" in str(e).lower():
+            logger.error("Database is read-only. Please check file permissions:")
+            if "sqlite" in settings.DATABASE_URL:
+                db_path = settings.DATABASE_URL.replace("sqlite:///", "")
+                logger.error(f"  Database file: {db_path}")
+                logger.error(f"  Run: sudo chown $(whoami):$(whoami) {db_path}")
+                logger.error(f"  Run: sudo chmod 664 {db_path}")
+        return False
 
 def verify_database_schema():
     """Verify that the database schema matches the expected structure"""
