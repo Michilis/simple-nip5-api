@@ -6,41 +6,29 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 import logging
 
-from app.database import create_tables
 from app.routes import public, admin, nostr_json
 from app.services.scheduler import invoice_scheduler
-from app.services.whitelist import whitelist_service
+from app.services.startup import startup_manager
 from config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Track server startup time for uptime calculation
-startup_time = None
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown"""
-    global startup_time
     
     # Startup
-    startup_time = datetime.utcnow()
     logger.info("Starting NIP-05 API application...")
     
-    # Create database tables
-    create_tables()
-    logger.info("Database tables created/verified")
+    # Run comprehensive startup checks
+    startup_status = await startup_manager.run_startup_checks()
     
-    # Sync whitelist.json to database
-    try:
-        whitelist_stats = whitelist_service.sync_whitelist_to_database()
-        if any(whitelist_stats.values()):
-            logger.info(f"Whitelist sync: {whitelist_stats['added']} added, {whitelist_stats['updated']} updated, {whitelist_stats['deactivated']} deactivated, {whitelist_stats['errors']} errors")
-        else:
-            logger.info("Whitelist file processed (no changes needed)")
-    except Exception as e:
-        logger.warning(f"Whitelist sync failed: {str(e)}")
+    # Check if startup was successful
+    if startup_status["status"] == "degraded":
+        # Log critical errors but continue running (some issues may be non-critical)
+        logger.warning("Application started with some issues - check logs above")
     
     # Start invoice polling scheduler
     invoice_scheduler.start()
@@ -195,6 +183,8 @@ async def root():
     
     Returns basic service information and status.
     """
+    from app.services.whitelist import whitelist_service
+    
     return {
         "service": "Simple NIP-05 API",
         "status": "healthy",
@@ -217,16 +207,19 @@ async def health_check():
     - Service health status
     - Server uptime
     - Enabled features  
-    - Scheduler status
+    - Startup checks status
+    - Database information
     """
+    from app.services.whitelist import whitelist_service
+    
+    # Get startup status
+    startup_status = startup_manager.get_startup_status()
+    
     # Calculate uptime
-    uptime_seconds = 0
+    uptime_seconds = int(startup_status["uptime_seconds"])
     uptime_formatted = "Unknown"
     
-    if startup_time:
-        uptime_delta = datetime.utcnow() - startup_time
-        uptime_seconds = int(uptime_delta.total_seconds())
-        
+    if uptime_seconds > 0:
         # Format uptime as human-readable string
         days = uptime_seconds // 86400
         hours = (uptime_seconds % 86400) // 3600
@@ -243,9 +236,15 @@ async def health_check():
             uptime_formatted = f"{seconds}s"
     
     return {
-        "status": "healthy",
+        "status": startup_status["status"],
         "uptime_seconds": uptime_seconds,
         "uptime": uptime_formatted,
+        "startup_checks": {
+            "passed": startup_status["checks_passed"],
+            "total": startup_status["total_checks"],
+            "details": startup_status["checks"],
+            "errors": startup_status["errors"]
+        },
         "scheduler_running": invoice_scheduler.is_running,
         "domain": settings.DOMAIN,
         "features": {
@@ -256,5 +255,6 @@ async def health_check():
             "nostr_dm_enabled": settings.NOSTR_DM_ENABLED
         },
         "whitelist_status": whitelist_service.get_whitelist_status(),
+        "database": startup_manager.get_database_info(),
         "documentation": "/api-docs"
     } 
