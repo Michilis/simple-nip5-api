@@ -389,97 +389,6 @@ CORS_ENABLED=true
 CORS_ORIGINS=https://yoursite.com,https://app.yoursite.com
 ```
 
-### 🐳 Docker Deployment
-
-```dockerfile
-FROM python:3.11-slim
-
-WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt
-
-COPY . .
-EXPOSE 8000
-
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
-```
-
-### 🔄 Systemd Service
-
-```ini
-[Unit]
-Description=NIP-05 API Service
-After=network.target
-
-[Service]
-Type=simple
-User=nip05
-WorkingDirectory=/home/nip05/simple-nip5-api
-Environment=PATH=/home/nip05/simple-nip5-api/venv/bin
-ExecStart=/home/nip05/simple-nip5-api/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
-Restart=always
-
-[Install]
-WantedBy=multi-user.target
-```
-
-## 📊 Monitoring & Health
-
-### 🔍 Health Endpoints
-
-- **`/`** - Basic health check
-- **`/health`** - Detailed system status with:
-  - Startup check results (4/4 checks passed)
-  - Database information and statistics
-  - Feature status and configuration
-  - Server uptime and performance metrics
-
-### 📈 Monitoring Integration
-
-The health endpoints provide structured data perfect for monitoring tools:
-
-```bash
-# Check basic health
-curl http://localhost:8000/
-
-# Detailed health with database info
-curl http://localhost:8000/health
-```
-
-## 🛠️ Development
-
-### 🏃‍♂️ Local Development
-
-```bash
-# Clone and setup
-git clone https://github.com/Michilis/simple-nip5-api.git
-cd simple-nip5-api
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-
-# Configure for development
-cp env.example .env
-# Edit .env with your settings
-
-# Run with auto-reload
-python run.py
-```
-
-### 🧪 Testing
-
-```bash
-# Install test dependencies
-pip install pytest pytest-asyncio httpx
-
-# Run tests
-pytest
-
-# Test specific endpoint
-curl -X POST http://localhost:8000/api/user/info \
-  -H "Content-Type: application/json" \
-  -d '{"npub": "npub1234..."}'
-```
 
 ## 📄 License
 
@@ -492,9 +401,3 @@ MIT License - see [LICENSE](LICENSE) file for details.
 3. Make your changes
 4. Add tests if applicable
 5. Submit a pull request
-
-## 📞 Support
-
-- **GitHub Issues**: [Report bugs or request features](https://github.com/Michilis/simple-nip5-api/issues)
-- **Documentation**: Visit `/api-docs` when running the application
-- **Health Check**: Use `/health` endpoint for system diagnostics 
