@@ -77,11 +77,16 @@ def find_user_by_identifier(db: Session, identifier: str) -> Optional[User]:
     **Admin Authentication Required** - Include `X-API-Key` header with your admin API key.
     
     ### Process:
-    1. Validates npub format
+    1. Validates npub/pubkey format  
     2. If username not provided, generates temporary username and queues for Nostr profile sync
     3. Checks username availability
     4. Adds user to database
     5. User immediately appears in `/.well-known/nostr.json`
+    
+    ### Input Format:
+    The `npub` field can accept either:
+    - **npub format**: `npub1abc123...` (bech32 encoded)
+    - **hex pubkey**: `abc123def456...` (64-character hex string)
     
     ### Use Cases:
     - **Admin-Only Mode**: Primary method for adding users
@@ -104,8 +109,25 @@ def find_user_by_identifier(db: Session, identifier: str) -> Optional[User]:
             "model": ErrorResponse,
             "content": {
                 "application/json": {
-                    "example": {
-                        "detail": "Invalid npub format"
+                    "examples": {
+                        "invalid_npub": {
+                            "summary": "Invalid npub format",
+                            "value": {
+                                "detail": "Invalid npub format"
+                            }
+                        },
+                        "invalid_pubkey": {
+                            "summary": "Invalid pubkey format",
+                            "value": {
+                                "detail": "Invalid pubkey format"
+                            }
+                        },
+                        "invalid_input": {
+                            "summary": "Invalid input format",
+                            "value": {
+                                "detail": "Invalid input format. Must be npub or 64-character hex pubkey"
+                            }
+                        }
                     }
                 }
             }
@@ -153,14 +175,35 @@ async def add_user(
     """Add a user to the NIP-05 whitelist"""
     
     try:
-        # Validate npub format
-        if not validate_npub(request.npub):
+        # Try to determine if input is npub or hex pubkey
+        input_value = request.npub.strip()
+        
+        if input_value.startswith('npub1'):
+            # Input is npub format
+            if not validate_npub(input_value):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid npub format"
+                )
+            pubkey = npub_to_pubkey(input_value)
+            npub_value = input_value
+        elif len(input_value) == 64:
+            # Input is likely hex pubkey
+            try:
+                # Validate it's a valid hex string
+                int(input_value, 16)
+                pubkey = input_value.lower()
+                npub_value = pubkey_to_npub(pubkey)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid pubkey format"
+                )
+        else:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid npub format"
+                detail="Invalid input format. Must be npub or 64-character hex pubkey"
             )
-        
-        pubkey = npub_to_pubkey(request.npub)
         
         # Check if user already exists by pubkey
         existing_user_by_pubkey = db.query(User).filter(User.pubkey == pubkey).first()
@@ -203,7 +246,7 @@ async def add_user(
         new_user = User(
             username=username,
             pubkey=pubkey,
-            npub=request.npub,
+            npub=npub_value,
             is_active=True,
             subscription_type="lifetime",  # Manually added users get lifetime subscription
             expires_at=None,  # Lifetime never expires
