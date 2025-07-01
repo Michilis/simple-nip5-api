@@ -1,56 +1,30 @@
 # Simple NIP-05 API
 
-A Lightning-powered NIP-05 identity service that allows users to register a NIP-05 identity via LNbits payments and provides admin control over whitelist management. Can also run as an admin-only service without Lightning payments.
+A comprehensive Lightning-powered NIP-05 identity service with automatic database management, Nostr DM notifications, and flexible user management. Supports both Lightning payments and admin-only registration modes.
 
-## Features
+## ✨ Features
 
 - 🚀 **Lightning Payments**: Integrated with LNbits for instant Bitcoin payments (optional)
 - 🆔 **NIP-05 Identity**: Full NIP-05 identity verification support
 - 🔄 **Background Polling**: Robust payment verification with webhook fallback
-- 🛡️ **Admin Controls**: Secure API for user management
-- 📊 **Health Monitoring**: Built-in health checks and status endpoints
-- 🗄️ **Database Support**: SQLite by default, PostgreSQL ready
+- 🛡️ **Admin Controls**: Secure API for comprehensive user management
+- 📊 **Health Monitoring**: Built-in health checks with startup diagnostics
+- 🗄️ **Database Support**: SQLite by default, PostgreSQL ready with auto-migration
 - 🔗 **Nostr Sync**: Automatic username sync from Nostr profiles (kind:0 events)
-- ⚙️ **Flexible Mode**: Lightning mode or admin-only mode
+- 💬 **Nostr DMs**: Automated direct message notifications for user events
+- 📄 **Whitelist.json**: File-based user management with database sync
+- ⚙️ **Flexible Modes**: Lightning mode or admin-only mode
+- 🌐 **CORS Support**: Configurable cross-origin resource sharing
 - 📚 **API Documentation**: Interactive Swagger documentation
+- 🔧 **Auto Database Management**: Automatic schema updates and health checks
 
-## API Documentation
-
-### 📚 Interactive Documentation
-
-Once your application is running, visit **`/api-docs`** for comprehensive Swagger documentation:
-
-```
-http://localhost:8000/api-docs
-```
-
-The documentation includes:
-- **Complete API Reference**: All endpoints with descriptions and examples
-- **Try It Out**: Interactive testing directly in the browser
-- **Request/Response Models**: Detailed schema documentation
-- **Authentication Guide**: How to use API keys
-- **Response Codes**: All possible HTTP status codes and meanings
-
-### 🎯 Quick API Overview
-
-| Endpoint | Method | Description | Authentication |
-|----------|---------|-------------|----------------|
-| `/.well-known/nostr.json` | GET | NIP-05 identity resolution | None |
-| `/api/public/invoice` | POST | Create Lightning invoice | None |
-| `/api/public/webhook/paid` | POST | Payment webhook | None |
-| `/api/whitelist/add` | POST | Add user manually | API Key |
-| `/api/whitelist/remove` | POST | Remove user | API Key |
-| `/api/whitelist/users` | GET | List all users | API Key |
-| `/api/whitelist/sync-usernames` | POST | Sync from Nostr profiles | API Key |
-| `/health` | GET | System health check | None |
-
-## Quick Start
+## 🚀 Quick Start
 
 ### 1. Installation
 
 ```bash
 # Clone the repository
-git clone <your-repo-url>
+git clone https://github.com/Michilis/simple-nip5-api.git
 cd simple-nip5-api
 
 # Create virtual environment
@@ -73,19 +47,38 @@ nano .env
 
 **Lightning Mode Configuration:**
 ```env
+# Lightning Settings
 LNBITS_ENABLED=true
-ADMIN_API_KEY=your-secret-admin-key-here
 LNBITS_API_KEY=your-lnbits-api-key
 LNBITS_ENDPOINT=https://your-lnbits-instance.com
+
+# Domain & Security
 DOMAIN=yourdomain.com
-WEBHOOK_URL=https://yourdomain.com/api/public/webhook/paid
+ADMIN_API_KEY=your-secret-admin-key-here
+WEBHOOK_URL=https://yourdomain.com/api/webhook/paid
+
+# Nostr DM Notifications (optional)
+NOSTR_DM_ENABLED=true
+NOSTR_DM_PRIVATE_KEY=your-nostr-private-key-hex
+NOSTR_DM_RELAYS=wss://relay.damus.io,wss://nostr.bitcoiner.social
+
+# CORS (optional)
+CORS_ENABLED=true
+CORS_ORIGINS=*
 ```
 
 **Admin-Only Mode Configuration:**
 ```env
+# Lightning Settings
 LNBITS_ENABLED=false
-ADMIN_API_KEY=your-secret-admin-key-here
+
+# Domain & Security
 DOMAIN=yourdomain.com
+ADMIN_API_KEY=your-secret-admin-key-here
+
+# Optional Features
+NOSTR_DM_ENABLED=false
+CORS_ENABLED=true
 ```
 
 ### 3. Run the Application
@@ -100,324 +93,304 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000
 
 The API will be available at `http://localhost:8000`
 
-## Operating Modes
+## 📚 API Documentation
+
+### 🔗 Interactive Documentation
+
+Once your application is running, visit **`/api-docs`** for comprehensive Swagger documentation:
+
+```
+http://localhost:8000/api-docs
+```
+
+### 🎯 API Endpoints Overview
+
+| Endpoint | Method | Description | Auth Required |
+|----------|---------|-------------|---------------|
+| **Public Endpoints** |
+| `/.well-known/nostr.json` | GET | NIP-05 identity resolution | None |
+| `/api/invoice` | POST | Create Lightning invoice | None |
+| `/api/user/info` | POST | Get user information by npub/pubkey | None |
+| `/api/webhook/paid` | POST | Payment webhook (LNbits) | None |
+| `/health` | GET | Detailed system health check | None |
+| **Admin Endpoints** |
+| `/api/whitelist/add` | POST | Add user manually | API Key |
+| `/api/whitelist/remove` | POST | Remove user | API Key |
+| `/api/whitelist/users` | GET | List all users | API Key |
+| `/api/whitelist/activate/{npub}` | POST | Activate user | API Key |
+| `/api/whitelist/deactivate/{npub}` | POST | Deactivate user | API Key |
+| `/api/whitelist/sync-usernames` | POST | Sync usernames from Nostr | API Key |
+| `/api/whitelist/set-username` | POST | Set username manually | API Key |
+| `/api/whitelist/remove-username` | POST | Remove manual username setting | API Key |
+
+### 🔧 Input Format Support
+
+Many endpoints now support **flexible input formats**:
+
+- **npub format**: `npub1abc123...` (bech32 encoded)
+- **hex pubkey**: `abc123def456...` (64-character hex string)
+
+**Supported endpoints:**
+- `/api/user/info` - `npub` field
+- `/api/whitelist/add` - `npub` field  
+- `/api/whitelist/remove` - `npub` field
+- `/api/whitelist/activate/{npub}` - path parameter
+- `/api/whitelist/deactivate/{npub}` - path parameter
+
+## 🏗️ Operating Modes
 
 ### ⚡ Lightning Mode (`LNBITS_ENABLED=true`)
 - **Public Registration**: Users can self-register by paying Lightning invoices
 - **Automatic Processing**: Background tasks monitor and process payments
 - **Admin Override**: Admins can still manually add/remove users
 - **Full Feature Set**: All endpoints and functionality available
+- **DM Notifications**: Automatic payment confirmations and updates
 
 ### 👨‍💼 Admin-Only Mode (`LNBITS_ENABLED=false`)
 - **Manual Registration**: Only admins can add/remove users
 - **No Payment Processing**: Lightning endpoints return 503 Service Unavailable
 - **Resource Efficient**: No background invoice polling
 - **Pure NIP-05 Service**: Focus on identity resolution without payments
+- **Whitelist Management**: Use whitelist.json or API for user management
 
-## API Endpoints
+## 💾 Database Management
 
-### Public Endpoints
+### 🔄 Automatic Schema Management
 
-#### Create Invoice (Lightning Mode Only)
-```http
-POST /api/public/invoice
-```
+The application includes a comprehensive database management system:
 
-**Request:**
+- **Automatic Migrations**: Schema updates applied on startup
+- **Health Checks**: 4-stage startup validation process
+- **Cross-Database Support**: SQLite, PostgreSQL, MySQL compatible
+- **Error Recovery**: Detailed diagnostics and repair guidance
+- **Backup Friendly**: Safe migration with rollback support
+
+### 📊 Startup Health Checks
+
+1. **Database Initialization** - Creates tables and runs migrations
+2. **Schema Verification** - Confirms all required columns exist  
+3. **Configuration Validation** - Checks critical settings
+4. **Whitelist Synchronization** - Syncs whitelist.json if present
+
+Check startup status at `/health` endpoint.
+
+## 📄 Whitelist.json Management
+
+### 📝 File-Based User Management
+
+Create a `whitelist.json` file for bulk user management:
+
 ```json
 {
-  "username": "alice",
-  "npub": "npub1abc123...",
-  "subscription_type": "yearly"
+  "users": [
+    {
+      "pubkey": "npub1abc123...",
+      "username": "alice",
+      "active": true,
+      "note": "Early supporter"
+    },
+    {
+      "pubkey": "def456789abcdef...",
+      "username": "bob", 
+      "active": true,
+      "note": "Manual addition"
+    }
+  ]
 }
 ```
 
-**Response (Lightning Mode):**
-```json
-{
-  "payment_hash": "abc123...",
-  "payment_request": "lnbc1000n1...",
-  "amount_sats": 1000,
-  "expires_at": "2024-01-01T12:00:00Z",
-  "username": "alice"
-}
-```
+### 🔄 Automatic Sync
 
-**Response (Admin-Only Mode):**
-```json
-{
-  "detail": "Lightning payment functionality is disabled. Contact administrator for manual registration."
-}
-```
+- **Startup Sync**: Automatically syncs on application start
+- **Conflict Resolution**: Whitelist.json takes precedence over database
+- **Username Protection**: Whitelist users get manual username protection
+- **Status Tracking**: View sync status in health endpoint
 
-#### Payment Webhook (Lightning Mode Only)
-```http
-POST /api/public/webhook/paid
-```
+## 🔗 Username Synchronization
 
-**Request:**
-```json
-{
-  "payment_hash": "abc123...",
-  "paid": true,
-  "amount": 1000
-}
-```
-
-### Admin Endpoints
-
-All admin endpoints require the `X-API-Key` header with your admin API key.
-
-#### Add User
-```http
-POST /api/whitelist/add
-Header: X-API-Key: your-admin-key
-```
-
-**Request:**
-```json
-{
-  "username": "bob",
-  "npub": "npub1def456..."
-}
-```
-
-#### Remove User
-```http
-POST /api/whitelist/remove
-Header: X-API-Key: your-admin-key
-```
-
-**Request:**
-```json
-{
-  "username": "bob"
-}
-```
-
-#### List Users
-```http
-GET /api/whitelist/users?active_only=true
-Header: X-API-Key: your-admin-key
-```
-
-#### Activate/Deactivate User
-```http
-POST /api/whitelist/activate/alice
-POST /api/whitelist/deactivate/alice
-Header: X-API-Key: your-admin-key
-```
-
-#### Manual Username Sync
-```http
-POST /api/whitelist/sync-usernames
-Header: X-API-Key: your-admin-key
-```
-
-### NIP-05 Endpoint
-
-#### Well-Known Nostr JSON
-```http
-GET /.well-known/nostr.json
-```
-
-**Response:**
-```json
-{
-  "names": {
-    "alice": "abc123...",
-    "bob": "def456..."
-  }
-}
-```
-
-## Username Synchronization
+### 🔄 Automatic Nostr Profile Sync
 
 The system automatically syncs usernames from users' Nostr profiles:
 
-### 🔄 How It Works
-
-1. **Background Task**: Runs every 15 minutes (configurable)
+1. **Background Task**: Runs every 60 minutes (configurable)
 2. **Profile Fetching**: Queries Nostr relays for kind:0 (profile) events
 3. **Name Extraction**: Extracts the `name` field from profile metadata
 4. **Validation**: Ensures the name is valid for NIP-05 usage
-5. **Update**: Updates username if different (checks for conflicts)
+5. **Conflict Handling**: Resolves username conflicts intelligently
 6. **Rate Limiting**: Max once per 24 hours per user
+
+### 🛡️ Manual Username Control
+
+- **Manual Override**: Set usernames manually via API
+- **Sync Exclusion**: Manually set usernames excluded from auto-sync
+- **Flexible Management**: Enable/disable auto-sync per user
 
 ### 🔗 Relay Configuration
 
-Default relays (configurable):
-- `wss://relay.azzamo.net`
-- `wss://relay.damus.io` 
-- `wss://primal.net`
+```env
+NOSTR_RELAYS=wss://relay.azzamo.net,wss://relay.damus.io,wss://primal.net
+USERNAME_SYNC_ENABLED=true
+USERNAME_SYNC_INTERVAL_MINUTES=60
+USERNAME_SYNC_MAX_AGE_HOURS=24
+```
 
-### ⚙️ Configuration Options
+## 💬 Nostr DM Notifications
+
+### 📨 Automated Messaging
+
+Send automatic DM notifications for user events:
+
+- **Payment Confirmed**: When Lightning payment is received
+- **User Whitelisted**: When manually added by admin
+- **User Removed**: When removed from whitelist
+- **Subscription Expiry**: Warnings and notifications
+- **Username Updates**: When username changes
+
+### 📋 Message Templates
+
+Customize messages in `messages.json`:
+
+```json
+{
+  "payment_confirmed": {
+    "subject": "Payment Confirmed!",
+    "body": "Your payment has been confirmed! Welcome to {domain}..."
+  },
+  "user_whitelisted": {
+    "subject": "Welcome to {domain}!",
+    "body": "You have been added to our NIP-05 service..."
+  }
+}
+```
+
+### ⚙️ DM Configuration
 
 ```env
-USERNAME_SYNC_ENABLED=true
-USERNAME_SYNC_INTERVAL_MINUTES=15
-USERNAME_SYNC_MAX_AGE_HOURS=24
-NOSTR_RELAYS=wss://relay.azzamo.net,wss://relay.damus.io,wss://primal.net
+NOSTR_DM_ENABLED=true
+NOSTR_DM_PRIVATE_KEY=your-nostr-private-key-hex
+NOSTR_DM_RELAYS=wss://relay.damus.io,wss://nostr.bitcoiner.social
+NOSTR_DM_FROM_NAME=NIP-05 Service
 ```
 
-### 🧪 Testing
+## 🌐 CORS Configuration
 
-Manually trigger sync for testing:
-```bash
-curl -X POST http://localhost:8000/api/whitelist/sync-usernames \
-  -H "X-API-Key: your-admin-key"
+### 🔧 Flexible CORS Setup
+
+Configure cross-origin resource sharing for web applications:
+
+```env
+# Enable/disable CORS
+CORS_ENABLED=true
+
+# Allow all origins (development)
+CORS_ORIGINS=*
+
+# Specific origins (production)
+CORS_ORIGINS=https://yourwebsite.com,https://app.yoursite.com
+
+# Additional CORS settings
+CORS_ALLOW_CREDENTIALS=true
+CORS_ALLOW_METHODS=GET,POST,PUT,DELETE
+CORS_ALLOW_HEADERS=*
 ```
 
-## Health Monitoring
+## 💰 Payment Flow (Lightning Mode)
 
-### Health Check Endpoints
-
-#### Basic Status
-```http
-GET /
-```
-
-**Response:**
-```json
-{
-  "service": "Simple NIP-05 API",
-  "status": "healthy",
-  "version": "1.0.0",
-  "domain": "yourdomain.com",
-  "lnbits_enabled": true,
-  "username_sync_enabled": true
-}
-```
-
-#### Detailed Health Check
-```http
-GET /health
-```
-
-**Response (Lightning Mode):**
-```json
-{
-  "status": "healthy",
-  "scheduler_running": true,
-  "domain": "yourdomain.com",
-  "features": {
-    "lnbits_enabled": true,
-    "username_sync_enabled": true,
-    "admin_only_mode": false
-  },
-  "endpoints": {
-    "nostr_json": "/.well-known/nostr.json",
-    "create_invoice": "/api/public/invoice",
-    "webhook": "/api/public/webhook/paid",
-    "admin_add": "/api/whitelist/add",
-    "admin_remove": "/api/whitelist/remove",
-    "admin_users": "/api/whitelist/users",
-    "admin_sync": "/api/whitelist/sync-usernames"
-  }
-}
-```
-
-**Response (Admin-Only Mode):**
-```json
-{
-  "status": "healthy",
-  "scheduler_running": true,
-  "domain": "yourdomain.com",
-  "features": {
-    "lnbits_enabled": false,
-    "username_sync_enabled": true,
-    "admin_only_mode": true
-  },
-  "endpoints": {
-    "nostr_json": "/.well-known/nostr.json",
-    "admin_add": "/api/whitelist/add",
-    "admin_remove": "/api/whitelist/remove",
-    "admin_users": "/api/whitelist/users",
-    "admin_sync": "/api/whitelist/sync-usernames"
-  }
-}
-```
-
-## Architecture
-
-```
-nip05-api/
-├── app/
-│   ├── main.py              # FastAPI app and routes
-│   ├── models.py            # SQLAlchemy ORM models
-│   ├── schemas.py           # Pydantic request/response models
-│   ├── database.py          # DB session and connection
-│   ├── services/
-│   │   ├── lnbits.py        # LNbits invoice creation & verification
-│   │   ├── nip05.py         # Username normalization and nostr.json generation
-│   │   ├── nostr_sync.py    # Nostr relay integration and profile sync
-│   │   └── scheduler.py     # Polling for unpaid invoices & username sync
-│   └── routes/
-│       ├── public.py        # /api/public/* endpoints
-│       ├── admin.py         # /api/whitelist/* endpoints
-│       └── nostr_json.py    # /.well-known/nostr.json
-├── config.py                # Settings and .env loading
-├── requirements.txt         # Python dependencies
-└── run.py                   # App entry point
-```
-
-## Payment Flow (Lightning Mode)
-
-1. **User Requests Invoice**: POST to `/api/public/invoice` with username and npub
+1. **User Requests Invoice**: POST to `/api/invoice` with username and npub
 2. **Invoice Created**: System creates LNbits invoice and returns payment request
 3. **User Pays**: User pays the Lightning invoice
 4. **Payment Notification**: LNbits sends webhook or system polls for payment
 5. **User Activated**: System activates user and includes in nostr.json
-6. **NIP-05 Active**: User's identity is now resolvable via `username@yourdomain.com`
+6. **DM Notification**: User receives payment confirmation (if enabled)
 7. **Username Sync**: System periodically updates username from Nostr profile
 
-## Configuration Options
+## ⚙️ Configuration Reference
+
+### 🔧 Core Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `DOMAIN` | Your domain name | `"localhost"` |
+| `ADMIN_API_KEY` | Admin API authentication key | `"your-secret-admin-key-here"` |
+| `DATABASE_URL` | Database connection string | `"sqlite:///./nip05.db"` |
+
+### ⚡ Lightning Settings
 
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `LNBITS_ENABLED` | Enable Lightning payment functionality | `true` |
-| `ADMIN_API_KEY` | Admin API authentication key | `"your-secret-admin-key-here"` |
 | `LNBITS_API_KEY` | LNbits API key | `""` |
 | `LNBITS_ENDPOINT` | LNbits instance URL | `"https://demo.lnbits.com"` |
 | `NIP05_YEARLY_PRICE_SATS` | Yearly subscription price | `1000` |
-| `NIP05_LIFETIME_PRICE_SATS` | Lifetime subscription price | `10000` |
+| `NIP05_LIFETIME_PRICE_SATS` | Lifetime subscription price | `5000` |
 | `INVOICE_EXPIRY_SECONDS` | Invoice expiration time | `1800` (30 min) |
-| `DATABASE_URL` | Database connection string | `"sqlite:///./nip05.db"` |
-| `DOMAIN` | Your domain name | `"localhost"` |
-| `WEBHOOK_URL` | Webhook callback URL | `"http://localhost:8000/api/public/webhook/paid"` |
+| `WEBHOOK_URL` | Webhook callback URL | `"http://localhost:8000/api/webhook/paid"` |
+
+### 🔗 Nostr Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
 | `USERNAME_SYNC_ENABLED` | Enable automatic username sync | `true` |
-| `USERNAME_SYNC_INTERVAL_MINUTES` | Sync interval in minutes | `15` |
+| `USERNAME_SYNC_INTERVAL_MINUTES` | Sync interval in minutes | `60` |
 | `USERNAME_SYNC_MAX_AGE_HOURS` | Max hours between syncs per user | `24` |
 | `NOSTR_RELAYS` | Comma-separated list of Nostr relays | `"wss://relay.azzamo.net,..."` |
 
-## Deployment
+### 💬 DM Settings
 
-### Environment Setup
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `NOSTR_DM_ENABLED` | Enable DM notifications | `true` |
+| `NOSTR_DM_PRIVATE_KEY` | Nostr private key for sending DMs | `""` |
+| `NOSTR_DM_RELAYS` | Relays for sending DMs | `"wss://relay.damus.io,..."` |
+| `NOSTR_DM_FROM_NAME` | Sender name for DMs | `"NIP-05 Service"` |
 
-Create `.env` file based on your deployment mode:
+### 🌐 CORS Settings
 
-**Lightning Mode (.env):**
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `CORS_ENABLED` | Enable CORS middleware | `true` |
+| `CORS_ORIGINS` | Allowed origins (* for all) | `"*"` |
+| `CORS_ALLOW_CREDENTIALS` | Allow credentials | `true` |
+| `CORS_ALLOW_METHODS` | Allowed HTTP methods | `"*"` |
+| `CORS_ALLOW_HEADERS` | Allowed headers | `"*"` |
+
+### 📄 File Settings
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `WHITELIST_FILE` | Whitelist JSON file path | `"whitelist.json"` |
+| `MESSAGES_FILE` | DM messages template file | `"messages.json"` |
+
+## 🚀 Deployment
+
+### 🌐 Production Environment
+
+**Production .env Example:**
 ```env
+# Core Settings
+DOMAIN=nip05.yourdomain.com
+ADMIN_API_KEY=super-secret-admin-key-123
+DATABASE_URL=postgresql://user:pass@localhost/nip05db
+
+# Lightning Settings
 LNBITS_ENABLED=true
-ADMIN_API_KEY=super-secret-admin-key-123
-LNBITS_API_KEY=your-lnbits-api-key
+LNBITS_API_KEY=your-production-lnbits-key
 LNBITS_ENDPOINT=https://your-lnbits.com
-DOMAIN=nip05.yourdomain.com
-WEBHOOK_URL=https://nip05.yourdomain.com/api/public/webhook/paid
+WEBHOOK_URL=https://nip05.yourdomain.com/api/webhook/paid
+
+# Nostr Settings
 USERNAME_SYNC_ENABLED=true
+NOSTR_DM_ENABLED=true
+NOSTR_DM_PRIVATE_KEY=your-nostr-private-key
+NOSTR_DM_RELAYS=wss://relay.damus.io,wss://nostr.bitcoiner.social
+
+# Security
+CORS_ENABLED=true
+CORS_ORIGINS=https://yoursite.com,https://app.yoursite.com
 ```
 
-**Admin-Only Mode (.env):**
-```env
-LNBITS_ENABLED=false
-ADMIN_API_KEY=super-secret-admin-key-123
-DOMAIN=nip05.yourdomain.com
-USERNAME_SYNC_ENABLED=true
-```
+### 🐳 Docker Deployment
 
-### Docker (Recommended)
-
-**Dockerfile:**
 ```dockerfile
 FROM python:3.11-slim
 
@@ -431,195 +404,97 @@ EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
-**docker-compose.yml:**
-```yaml
-version: '3.8'
-services:
-  nip05-api:
-    build: .
-    ports:
-      - "8000:8000"
-    environment:
-      - LNBITS_ENABLED=true
-      - DOMAIN=nip05.yourdomain.com
-    env_file:
-      - .env
-    restart: unless-stopped
+### 🔄 Systemd Service
+
+```ini
+[Unit]
+Description=NIP-05 API Service
+After=network.target
+
+[Service]
+Type=simple
+User=nip05
+WorkingDirectory=/home/nip05/simple-nip5-api
+Environment=PATH=/home/nip05/simple-nip5-api/venv/bin
+ExecStart=/home/nip05/simple-nip5-api/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-### Reverse Proxy (Nginx)
+## 📊 Monitoring & Health
 
-```nginx
-server {
-    listen 80;
-    server_name nip05.yourdomain.com;
-    
-    location / {
-        proxy_pass http://localhost:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-    }
-    
-    location /.well-known/nostr.json {
-        proxy_pass http://localhost:8000/.well-known/nostr.json;
-        add_header Access-Control-Allow-Origin *;
-        add_header Access-Control-Allow-Methods GET;
-        add_header Content-Type application/json;
-    }
-}
-```
+### 🔍 Health Endpoints
 
-### SSL Setup (Certbot)
+- **`/`** - Basic health check
+- **`/health`** - Detailed system status with:
+  - Startup check results (4/4 checks passed)
+  - Database information and statistics
+  - Feature status and configuration
+  - Server uptime and performance metrics
+
+### 📈 Monitoring Integration
+
+The health endpoints provide structured data perfect for monitoring tools:
 
 ```bash
-# Install certbot
-sudo apt install certbot python3-certbot-nginx
+# Check basic health
+curl http://localhost:8000/
 
-# Get SSL certificate
-sudo certbot --nginx -d nip05.yourdomain.com
-
-# Verify auto-renewal
-sudo certbot renew --dry-run
-```
-
-## Use Cases
-
-### 🏢 Commercial NIP-05 Service
-- **Lightning Mode**: Users pay sats for NIP-05 identity
-- **Automatic processing**: Minimal manual intervention
-- **Scalable**: Handles high volume of registrations
-
-### 🏠 Personal/Community Service  
-- **Admin-Only Mode**: Free service for friends/community
-- **Manual approval**: Full control over registrations
-- **Cost-effective**: No Lightning infrastructure needed
-
-### 🔄 Hybrid Service
-- **Start Admin-Only**: Begin with manual registrations
-- **Upgrade to Lightning**: Enable payments when ready
-- **Gradual transition**: Existing users unaffected
-
-## Testing
-
-### 📚 API Documentation
-
-First, check out the interactive API documentation at `/api-docs`:
-```
-http://localhost:8000/api-docs
-```
-
-Use the "Try it out" feature to test endpoints directly in your browser!
-
-### Manual Testing Commands
-
-```bash
-# Check service status
+# Detailed health with database info
 curl http://localhost:8000/health
-
-# Test nostr.json endpoint
-curl http://localhost:8000/.well-known/nostr.json
-
-# Add user (admin)
-curl -X POST http://localhost:8000/api/whitelist/add \
-  -H "X-API-Key: your-admin-key" \
-  -H "Content-Type: application/json" \
-  -d '{"username": "alice", "npub": "npub1..."}'
-
-# Create invoice (Lightning mode)
-curl -X POST http://localhost:8000/api/public/invoice \
-  -H "Content-Type: application/json" \
-  -d '{"username": "bob", "npub": "npub1...", "subscription_type": "yearly"}'
-
-# Trigger username sync
-curl -X POST http://localhost:8000/api/whitelist/sync-usernames \
-  -H "X-API-Key: your-admin-key"
 ```
 
-### Automated Testing
+## 🛠️ Development
+
+### 🏃‍♂️ Local Development
 
 ```bash
-# Run with pytest (when tests are added)
+# Clone and setup
+git clone https://github.com/Michilis/simple-nip5-api.git
+cd simple-nip5-api
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Configure for development
+cp env.example .env
+# Edit .env with your settings
+
+# Run with auto-reload
+python run.py
+```
+
+### 🧪 Testing
+
+```bash
+# Install test dependencies
 pip install pytest pytest-asyncio httpx
+
+# Run tests
 pytest
 
-# Load testing with curl
-for i in {1..10}; do
-  curl -s http://localhost:8000/health > /dev/null &
-done
-wait
+# Test specific endpoint
+curl -X POST http://localhost:8000/api/user/info \
+  -H "Content-Type: application/json" \
+  -d '{"npub": "npub1234..."}'
 ```
 
-## Security
+## 📄 License
 
-### Best Practices
+MIT License - see [LICENSE](LICENSE) file for details.
 
-- 🔐 **Strong Admin Keys**: Use cryptographically secure API keys
-- 🔒 **HTTPS Only**: Always use SSL in production
-- 🛡️ **Input Validation**: All inputs validated and sanitized
-- 🚫 **Rate Limiting**: Consider adding rate limiting for public endpoints
-- 📝 **Access Logs**: Monitor access patterns
-- 🔄 **Key Rotation**: Regularly rotate API keys
-
-### Security Headers
-
-```nginx
-# Add to nginx config
-add_header X-Frame-Options DENY;
-add_header X-Content-Type-Options nosniff;
-add_header X-XSS-Protection "1; mode=block";
-add_header Strict-Transport-Security "max-age=31536000; includeSubDomains";
-```
-
-## Troubleshooting
-
-### Common Issues
-
-**Issue**: Invoice endpoints return 503
-- **Solution**: Check `LNBITS_ENABLED=true` in .env
-
-**Issue**: Username sync not working  
-- **Solution**: Verify `NOSTR_RELAYS` are reachable and `USERNAME_SYNC_ENABLED=true`
-
-**Issue**: Users not appearing in nostr.json
-- **Solution**: Check `is_active=true` in database and domain configuration
-
-**Issue**: LNbits webhook not working
-- **Solution**: Verify `WEBHOOK_URL` is publicly accessible and correct
-
-### Debug Mode
-
-```bash
-# Enable debug logging
-export LOG_LEVEL=DEBUG
-python run.py
-
-# Check logs
-tail -f /var/log/nip05-api.log
-```
-
-## Contributing
+## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+2. Create a feature branch
 3. Make your changes
 4. Add tests if applicable
-5. Update documentation
-6. Submit a pull request
+5. Submit a pull request
 
-## License
+## 📞 Support
 
-MIT License - see LICENSE file for details
-
-## Support
-
-For issues and questions:
-- 📋 **GitHub Issues**: Create an issue with detailed description
-- 📊 **Health Check**: Check `/health` endpoint for system status
-- 🔧 **Configuration**: Verify your `.env` settings
-- 📖 **Documentation**: Refer to this README for setup instructions
-
----
-
-**Made with ⚡ for the Nostr ecosystem** 
+- **GitHub Issues**: [Report bugs or request features](https://github.com/Michilis/simple-nip5-api/issues)
+- **Documentation**: Visit `/api-docs` when running the application
+- **Health Check**: Use `/health` endpoint for system diagnostics 
