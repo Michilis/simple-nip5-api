@@ -3,26 +3,44 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.openapi.utils import get_openapi
 from contextlib import asynccontextmanager
+from datetime import datetime
 import logging
 
 from app.database import create_tables
 from app.routes import public, admin, nostr_json
 from app.services.scheduler import invoice_scheduler
+from app.services.whitelist import whitelist_service
 from config import settings
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Track server startup time for uptime calculation
+startup_time = None
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handle application startup and shutdown"""
+    global startup_time
+    
     # Startup
+    startup_time = datetime.utcnow()
     logger.info("Starting NIP-05 API application...")
     
     # Create database tables
     create_tables()
     logger.info("Database tables created/verified")
+    
+    # Sync whitelist.json to database
+    try:
+        whitelist_stats = whitelist_service.sync_whitelist_to_database()
+        if any(whitelist_stats.values()):
+            logger.info(f"Whitelist sync: {whitelist_stats['added']} added, {whitelist_stats['updated']} updated, {whitelist_stats['deactivated']} deactivated, {whitelist_stats['errors']} errors")
+        else:
+            logger.info("Whitelist file processed (no changes needed)")
+    except Exception as e:
+        logger.warning(f"Whitelist sync failed: {str(e)}")
     
     # Start invoice polling scheduler
     invoice_scheduler.start()
@@ -84,7 +102,7 @@ All endpoints return JSON responses with consistent error handling.
         tags=[
             {
                 "name": "public",
-                "description": "Public endpoints for Lightning payment registration"
+                "description": "Public endpoints for Lightning payment registration and user information"
             },
             {
                 "name": "admin", 
@@ -113,17 +131,8 @@ All endpoints return JSON responses with consistent error handling.
         "url": "https://opensource.org/licenses/MIT"
     }
     
-    # Add servers
-    openapi_schema["servers"] = [
-        {
-            "url": f"https://{settings.DOMAIN}",
-            "description": "Production server"
-        },
-        {
-            "url": "http://localhost:8000",
-            "description": "Development server"
-        }
-    ]
+    # Let Swagger UI automatically use the current URL
+    # When no servers are specified, Swagger UI uses the current request URL
     
     app.openapi_schema = openapi_schema
     return app.openapi_schema
@@ -142,14 +151,18 @@ app = FastAPI(
 # Set custom OpenAPI
 app.openapi = custom_openapi
 
-# Add CORS middleware
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# Add CORS middleware conditionally
+if settings.CORS_ENABLED:
+    logger.info(f"CORS enabled with origins: {settings.CORS_ORIGINS}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.cors_origins_list,
+        allow_credentials=settings.CORS_ALLOW_CREDENTIALS,
+        allow_methods=settings.cors_methods_list,
+        allow_headers=settings.cors_headers_list,
+    )
+else:
+    logger.info("CORS disabled - assuming handled by nginx/webserver")
 
 # Include routers
 app.include_router(public.router)
@@ -189,6 +202,9 @@ async def root():
         "domain": settings.DOMAIN,
         "lnbits_enabled": settings.LNBITS_ENABLED,
         "username_sync_enabled": settings.USERNAME_SYNC_ENABLED,
+        "cors_enabled": settings.CORS_ENABLED,
+        "nostr_dm_enabled": settings.NOSTR_DM_ENABLED,
+        "whitelist_status": whitelist_service.get_whitelist_status(),
         "documentation": "/api-docs"
     }
 
@@ -199,35 +215,46 @@ async def health_check():
     
     Returns comprehensive system status including:
     - Service health status
+    - Server uptime
     - Enabled features  
-    - Available endpoints
     - Scheduler status
     """
-    # Build endpoints list based on enabled features
-    endpoints = {
-        "nostr_json": f"/.well-known/nostr.json",
-        "admin_add": "/api/whitelist/add",
-        "admin_remove": "/api/whitelist/remove",
-        "admin_users": "/api/whitelist/users",
-        "admin_sync": "/api/whitelist/sync-usernames"
-    }
+    # Calculate uptime
+    uptime_seconds = 0
+    uptime_formatted = "Unknown"
     
-    # Add Lightning endpoints only if enabled
-    if settings.LNBITS_ENABLED:
-        endpoints.update({
-            "create_invoice": "/api/public/invoice",
-            "webhook": "/api/public/webhook/paid"
-        })
+    if startup_time:
+        uptime_delta = datetime.utcnow() - startup_time
+        uptime_seconds = int(uptime_delta.total_seconds())
+        
+        # Format uptime as human-readable string
+        days = uptime_seconds // 86400
+        hours = (uptime_seconds % 86400) // 3600
+        minutes = (uptime_seconds % 3600) // 60
+        seconds = uptime_seconds % 60
+        
+        if days > 0:
+            uptime_formatted = f"{days}d {hours}h {minutes}m {seconds}s"
+        elif hours > 0:
+            uptime_formatted = f"{hours}h {minutes}m {seconds}s"
+        elif minutes > 0:
+            uptime_formatted = f"{minutes}m {seconds}s"
+        else:
+            uptime_formatted = f"{seconds}s"
     
     return {
         "status": "healthy",
+        "uptime_seconds": uptime_seconds,
+        "uptime": uptime_formatted,
         "scheduler_running": invoice_scheduler.is_running,
         "domain": settings.DOMAIN,
         "features": {
             "lnbits_enabled": settings.LNBITS_ENABLED,
             "username_sync_enabled": settings.USERNAME_SYNC_ENABLED,
-            "admin_only_mode": not settings.LNBITS_ENABLED
+            "admin_only_mode": not settings.LNBITS_ENABLED,
+            "cors_enabled": settings.CORS_ENABLED,
+            "nostr_dm_enabled": settings.NOSTR_DM_ENABLED
         },
-        "endpoints": endpoints,
+        "whitelist_status": whitelist_service.get_whitelist_status(),
         "documentation": "/api-docs"
     } 

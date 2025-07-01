@@ -10,6 +10,7 @@ from app.database import SessionLocal
 from app.models import Invoice, User
 from app.services.lnbits import lnbits_service
 from app.services.nostr_sync import nostr_sync_service
+from app.services.nostr_dm import nostr_dm_service
 from config import settings
 
 logger = logging.getLogger(__name__)
@@ -43,6 +44,16 @@ class InvoiceScheduler:
                     replace_existing=True
                 )
                 logger.info(f"Username sync enabled - running every {settings.USERNAME_SYNC_INTERVAL_MINUTES} minutes")
+            
+            # Subscription expiry check job (if DM is enabled)
+            if nostr_dm_service.is_enabled():
+                self.scheduler.add_job(
+                    self.check_subscription_expiry,
+                    IntervalTrigger(hours=24),  # Check daily
+                    id='check_expiry',
+                    replace_existing=True
+                )
+                logger.info("Subscription expiry monitoring enabled - checking daily")
             
             self.scheduler.start()
             self.is_running = True
@@ -123,6 +134,72 @@ class InvoiceScheduler:
         finally:
             db.close()
     
+    async def check_subscription_expiry(self):
+        """Check for expiring subscriptions and send DM notifications"""
+        if not nostr_dm_service.is_enabled():
+            return
+            
+        db = SessionLocal()
+        try:
+            current_time = datetime.utcnow()
+            
+            # Check for subscriptions expiring in 7 days
+            expiring_soon_date = current_time + timedelta(days=7)
+            expiring_users = db.query(User).filter(
+                User.is_active == True,
+                User.expires_at.isnot(None),  # Has expiry date (not lifetime)
+                User.expires_at <= expiring_soon_date,
+                User.expires_at > current_time  # Not yet expired
+            ).all()
+            
+            # Check for already expired subscriptions
+            expired_users = db.query(User).filter(
+                User.is_active == True,
+                User.expires_at.isnot(None),
+                User.expires_at <= current_time
+            ).all()
+            
+            # Send expiring soon notifications
+            for user in expiring_users:
+                try:
+                    await nostr_dm_service.send_dm(
+                        recipient_pubkey=user.pubkey,
+                        message_type="subscription_expiring_soon",
+                        username=user.username,
+                        expires_at=user.expires_at.strftime("%Y-%m-%d")
+                    )
+                except Exception as dm_error:
+                    logger.warning(f"Failed to send expiring soon DM to {user.username}: {str(dm_error)}")
+            
+            # Send expired notifications and deactivate
+            for user in expired_users:
+                try:
+                    await nostr_dm_service.send_dm(
+                        recipient_pubkey=user.pubkey,
+                        message_type="subscription_expired",
+                        username=user.username,
+                        expired_at=user.expires_at.strftime("%Y-%m-%d")
+                    )
+                    
+                    # Deactivate expired user
+                    user.is_active = False
+                    
+                except Exception as dm_error:
+                    logger.warning(f"Failed to send expired DM to {user.username}: {str(dm_error)}")
+            
+            # Commit deactivations
+            if expired_users:
+                db.commit()
+                logger.info(f"Deactivated {len(expired_users)} expired subscriptions")
+            
+            if expiring_users:
+                logger.info(f"Sent expiry warnings to {len(expiring_users)} users")
+                
+        except Exception as e:
+            logger.error(f"Error checking subscription expiry: {str(e)}")
+        finally:
+            db.close()
+    
     async def check_invoice_payment(self, db: Session, invoice: Invoice):
         """Check a single invoice for payment"""
         if not settings.LNBITS_ENABLED:
@@ -138,12 +215,12 @@ class InvoiceScheduler:
                 logger.info(f"Payment confirmed for invoice {invoice.payment_hash}")
             else:
                 # Update polling schedule
-                self.update_polling_schedule(db, invoice)
+                await self.update_polling_schedule(db, invoice)
                 
         except Exception as e:
             logger.error(f"Error checking invoice {invoice.payment_hash}: {str(e)}")
             # Update polling schedule even on error
-            self.update_polling_schedule(db, invoice)
+            await self.update_polling_schedule(db, invoice)
     
     async def activate_user(self, db: Session, invoice: Invoice):
         """Activate user after successful payment"""
@@ -173,12 +250,25 @@ class InvoiceScheduler:
             db.commit()
             logger.info(f"User {invoice.username} activated successfully")
             
+            # Send DM notification for payment confirmation
+            try:
+                expires_at = "Never" if invoice.subscription_type == "lifetime" else invoice.expires_at.strftime("%Y-%m-%d")
+                await nostr_dm_service.send_dm(
+                    recipient_pubkey=invoice.pubkey,
+                    message_type="payment_confirmed",
+                    username=invoice.username,
+                    amount_sats=invoice.amount_sats,
+                    expires_at=expires_at
+                )
+            except Exception as dm_error:
+                logger.warning(f"Failed to send payment confirmation DM: {str(dm_error)}")
+            
         except Exception as e:
             db.rollback()
             logger.error(f"Error activating user {invoice.username}: {str(e)}")
             raise
     
-    def update_polling_schedule(self, db: Session, invoice: Invoice):
+    async def update_polling_schedule(self, db: Session, invoice: Invoice):
         """Update the next polling time based on current attempts"""
         if not settings.LNBITS_ENABLED:
             return
@@ -193,7 +283,20 @@ class InvoiceScheduler:
             if time_since_creation > settings.POLL_MAX_TIME:
                 # Stop polling after max time
                 invoice.next_poll_time = None
+                invoice.status = "expired"
                 logger.info(f"Stopped polling expired invoice {invoice.payment_hash}")
+                
+                # Send DM notification for expired invoice
+                try:
+                    await nostr_dm_service.send_dm(
+                        recipient_pubkey=invoice.pubkey,
+                        message_type="invoice_expired",
+                        username=invoice.username,
+                        amount_sats=invoice.amount_sats,
+                        expired_at=current_time.strftime("%Y-%m-%d %H:%M")
+                    )
+                except Exception as dm_error:
+                    logger.warning(f"Failed to send invoice expired DM: {str(dm_error)}")
             elif time_since_creation < settings.POLL_SWITCH_TIME:
                 # Poll every minute for first 10 minutes
                 invoice.next_poll_time = current_time + timedelta(seconds=settings.POLL_INITIAL_INTERVAL)

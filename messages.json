@@ -1,0 +1,38 @@
+{
+  "payment_confirmed": {
+    "subject": "🎉 Payment Confirmed - Welcome to NIP-05!",
+    "message": "Hey {username}! 🎉\n\nYour payment has been confirmed and your NIP-05 identity is now active!\n\n✅ Username: {username}@{domain}\n💰 Amount: {amount_sats} sats\n⏰ Expires: {expires_at}\n\nYou can now use your NIP-05 identifier across all Nostr clients. Welcome to the decentralized future!\n\n🔗 Verify your identity: https://{domain}/.well-known/nostr.json?name={username}"
+  },
+  "user_whitelisted": {
+    "subject": "✅ Account Activated - Welcome!",
+    "message": "Hello {username}! ✅\n\nGreat news! Your NIP-05 identity has been activated by an administrator.\n\n🆔 Your identifier: {username}@{domain}\n⏰ Active until: {expires_at}\n\nYou can now use this identifier in any Nostr client. Enjoy the decentralized social experience!\n\n🔗 Verify: https://{domain}/.well-known/nostr.json?name={username}"
+  },
+  "user_removed": {
+    "subject": "❌ Account Deactivated",
+    "message": "Hello {username},\n\nYour NIP-05 identity {username}@{domain} has been deactivated.\n\nIf you believe this is an error, please contact support.\n\nThank you for using our service."
+  },
+  "subscription_expired": {
+    "subject": "⏰ Subscription Expired",
+    "message": "Hey {username},\n\nYour NIP-05 subscription for {username}@{domain} has expired as of {expired_at}.\n\nTo continue using your NIP-05 identity, please renew your subscription.\n\n🔄 Renew at: https://{domain}\n\nThanks for being part of the Nostr ecosystem!"
+  },
+  "subscription_expiring_soon": {
+    "subject": "⚠️ Subscription Expiring Soon",
+    "message": "Hello {username}!\n\nYour NIP-05 subscription for {username}@{domain} is expiring soon.\n\n⏰ Expires: {expires_at}\n\nDon't lose your identity! Renew now to keep your NIP-05 active.\n\n🔄 Renew at: https://{domain}\n\nThank you for using our service!"
+  },
+  "invoice_expired": {
+    "subject": "⏰ Invoice Expired",
+    "message": "Hi there!\n\nYour invoice for the NIP-05 username '{username}@{domain}' has expired.\n\n💰 Amount: {amount_sats} sats\n⏰ Expired: {expired_at}\n\nIf you're still interested in this username, you can create a new invoice.\n\n🔄 Try again: https://{domain}"
+  },
+  "username_updated": {
+    "subject": "🔄 Username Updated",
+    "message": "Hello!\n\nYour NIP-05 username has been automatically updated to match your Nostr profile.\n\n🔄 Old: {old_username}@{domain}\n✅ New: {new_username}@{domain}\n\nThis change was made because your Nostr profile name was updated. Your identity remains secure and active!\n\n🔗 Verify: https://{domain}/.well-known/nostr.json?name={new_username}"
+  },
+  "welcome_new_user": {
+    "subject": "🚀 Welcome to NIP-05!",
+    "message": "Welcome to the decentralized future, {username}! 🚀\n\nYour NIP-05 identity is now live and ready to use:\n\n🆔 {username}@{domain}\n🔗 https://{domain}/.well-known/nostr.json?name={username}\n\nHere's what you can do now:\n• Use your identifier in any Nostr client\n• Verify your identity across the network\n• Enjoy censorship-resistant social networking\n\nWelcome to Nostr! 🤙"
+  },
+  "payment_reminder": {
+    "subject": "💡 Payment Pending",
+    "message": "Hi there!\n\nYou have a pending payment for the NIP-05 username '{username}@{domain}'.\n\n💰 Amount: {amount_sats} sats\n⏰ Expires: {expires_at}\n\nComplete your payment to activate your NIP-05 identity!\n\n⚡ Pay now to secure your username before it expires."
+  }
+} 

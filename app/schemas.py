@@ -80,11 +80,11 @@ class InvoiceResponse(BaseModel):
 
 # Admin schemas
 class AddUserRequest(BaseModel):
-    username: str = Field(
-        ..., 
+    username: Optional[str] = Field(
+        None, 
         min_length=1, 
         max_length=50,
-        description="Username to add (alphanumeric, dots, dashes, underscores only)",
+        description="Username to add (optional - will be fetched from Nostr profile if not provided)",
         example="bob"
     )
     npub: str = Field(
@@ -97,21 +97,102 @@ class AddUserRequest(BaseModel):
         json_schema_extra = {
             "example": {
                 "username": "bob",
-                "npub": "npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
+                "npub": "npub1fa789c2c57agz7v5w90yesvf3myd5jakjzgz28w7jl8fvqchy6nqlu6rn6"
             }
         }
 
 class RemoveUserRequest(BaseModel):
-    username: str = Field(
+    npub: str = Field(
         ..., 
-        description="Username to remove from the system",
-        example="bob"
+        description="User's nostr public key in npub (bech32) format or hex pubkey format",
+        example="npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
     )
     
     class Config:
         json_schema_extra = {
             "example": {
-                "username": "bob"
+                "npub": "npub1def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123"
+            }
+        }
+
+class SetUsernameRequest(BaseModel):
+    npub: str = Field(
+        ..., 
+        description="User's nostr public key in npub (bech32) format or hex pubkey format",
+        example="npub1fa789c2c57agz7v5w90yesvf3myd5jakjzgz28w7jl8fvqchy6nqlu6rn6"
+    )
+    username: str = Field(
+        ..., 
+        min_length=1, 
+        max_length=50,
+        description="Username to set manually (alphanumeric, dots, dashes, underscores only)",
+        example="alice"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "npub": "npub1fa789c2c57agz7v5w90yesvf3myd5jakjzgz28w7jl8fvqchy6nqlu6rn6",
+                "username": "alice"
+            }
+        }
+
+class RemoveUsernameRequest(BaseModel):
+    npub: str = Field(
+        ..., 
+        description="User's nostr public key in npub (bech32) format or hex pubkey format",
+        example="npub1fa789c2c57agz7v5w90yesvf3myd5jakjzgz28w7jl8fvqchy6nqlu6rn6"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "npub": "npub1fa789c2c57agz7v5w90yesvf3myd5jakjzgz28w7jl8fvqchy6nqlu6rn6"
+            }
+        }
+
+class UserInfoRequest(BaseModel):
+    npub: str = Field(
+        ..., 
+        description="User's nostr public key in npub (bech32) format or hex pubkey format",
+        example="npub1p6xyr6u5vet33r4x724vxmp9uwfllax5zjdgxeujyrtxt90lp74qvah0rm"
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "npub": "npub1p6xyr6u5vet33r4x724vxmp9uwfllax5zjdgxeujyrtxt90lp74qvah0rm"
+            }
+        }
+
+class UserInfoResponse(BaseModel):
+    pubkey: str = Field(
+        ..., 
+        description="User's nostr public key in hex format",
+        example="0e8c41eb946657188ea6f2aac36c25e393fff4d4149a83679220d66595ff0faa"
+    )
+    npub: str = Field(
+        ..., 
+        description="User's nostr public key in npub (bech32) format",
+        example="npub1p6xyr6u5vet33r4x724vxmp9uwfllax5zjdgxeujyrtxt90lp74qvah0rm"
+    )
+    time_remaining: Optional[int] = Field(
+        None,
+        description="UTC timestamp when subscription expires (only shown if user is not whitelisted)",
+        example=1704067200
+    )
+    is_whitelisted: bool = Field(
+        ..., 
+        description="Whether the user is currently whitelisted/active",
+        example=True
+    )
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "pubkey": "0e8c41eb946657188ea6f2aac36c25e393fff4d4149a83679220d66595ff0faa",
+                "npub": "npub1p6xyr6u5vet33r4x724vxmp9uwfllax5zjdgxeujyrtxt90lp74qvah0rm",
+                "is_whitelisted": True
             }
         }
 

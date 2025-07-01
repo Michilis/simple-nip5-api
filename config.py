@@ -9,6 +9,23 @@ class Settings:
     # Admin API security
     ADMIN_API_KEY: str = os.getenv("ADMIN_API_KEY", "your-secret-admin-key-here")
     
+    # CORS configuration
+    CORS_ENABLED: bool = os.getenv("CORS_ENABLED", "true").lower() == "true"
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "*")
+    CORS_ALLOW_CREDENTIALS: bool = os.getenv("CORS_ALLOW_CREDENTIALS", "true").lower() == "true"
+    CORS_ALLOW_METHODS: str = os.getenv("CORS_ALLOW_METHODS", "*")
+    CORS_ALLOW_HEADERS: str = os.getenv("CORS_ALLOW_HEADERS", "*")
+    
+    # Nostr DM configuration
+    NOSTR_DM_ENABLED: bool = os.getenv("NOSTR_DM_ENABLED", "true").lower() == "true"
+    NOSTR_DM_PRIVATE_KEY: str = os.getenv("NOSTR_DM_PRIVATE_KEY", "")
+    NOSTR_DM_RELAYS: str = os.getenv("NOSTR_DM_RELAYS", "wss://relay.damus.io,wss://nostr.bitcoiner.social,wss://relay.azzamo.net")
+    NOSTR_DM_FROM_NAME: str = os.getenv("NOSTR_DM_FROM_NAME", "NIP-05 Service")
+    MESSAGES_FILE: str = os.getenv("MESSAGES_FILE", "messages.json")
+    
+    # Whitelist configuration
+    WHITELIST_FILE: str = os.getenv("WHITELIST_FILE", "whitelist.json")
+    
     # LNbits configuration
     LNBITS_ENABLED: bool = os.getenv("LNBITS_ENABLED", "true").lower() == "true"
     LNBITS_API_KEY: str = os.getenv("LNBITS_API_KEY", "")
@@ -47,6 +64,32 @@ class Settings:
         "NIP05_DEFAULT_RELAYS",
         "wss://relay.damus.io,wss://nostr.bitcoiner.social,wss://nostr.fmt.wiz.biz"
     ).split(",")
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """Convert CORS_ORIGINS string to list"""
+        if self.CORS_ORIGINS == "*":
+            return ["*"]
+        return [origin.strip() for origin in self.CORS_ORIGINS.split(",") if origin.strip()]
+    
+    @property 
+    def cors_methods_list(self) -> List[str]:
+        """Convert CORS_ALLOW_METHODS string to list"""
+        if self.CORS_ALLOW_METHODS == "*":
+            return ["*"]
+        return [method.strip() for method in self.CORS_ALLOW_METHODS.split(",") if method.strip()]
+    
+    @property
+    def cors_headers_list(self) -> List[str]:
+        """Convert CORS_ALLOW_HEADERS string to list"""
+        if self.CORS_ALLOW_HEADERS == "*":
+            return ["*"]
+        return [header.strip() for header in self.CORS_ALLOW_HEADERS.split(",") if header.strip()]
+    
+    @property
+    def nostr_dm_relays_list(self) -> List[str]:
+        """Convert NOSTR_DM_RELAYS string to list"""
+        return [relay.strip() for relay in self.NOSTR_DM_RELAYS.split(",") if relay.strip()]
 
 # Global settings instance
 settings = Settings() 

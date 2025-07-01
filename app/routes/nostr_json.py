@@ -9,7 +9,7 @@ from app.schemas import NostrJsonResponse
 from app.services.nip05 import npub_to_pubkey
 from config import settings
 
-router = APIRouter()
+router = APIRouter(tags=["nostr"])
 
 @router.get(
     "/.well-known/nostr.json",

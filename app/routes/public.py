@@ -10,9 +10,11 @@ from app.schemas import (
     InvoiceResponse, 
     WebhookPayload, 
     StatusResponse,
-    ErrorResponse
+    ErrorResponse,
+    UserInfoRequest,
+    UserInfoResponse
 )
-from app.services.nip05 import normalize_username, npub_to_pubkey, validate_npub
+from app.services.nip05 import normalize_username, npub_to_pubkey, validate_npub, pubkey_to_npub
 from app.services.lnbits import lnbits_service
 from app.services.scheduler import invoice_scheduler
 from config import settings
@@ -354,5 +356,130 @@ async def webhook_payment_notification(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Webhook processing error: {str(e)}"
+        )
+
+@router.post(
+    "/user/info",
+    response_model=UserInfoResponse,
+    summary="Get User Information",
+    description="""
+    Get information about a user by their nostr public key.
+    
+    ### Input Format:
+    The `npub` field can accept either:
+    - **npub format**: `npub1abc123...` (bech32 encoded)
+    - **hex pubkey**: `abc123def456...` (64-character hex string)
+    
+    ### Response Fields:
+    - **pubkey**: User's public key in hex format
+    - **npub**: User's public key in npub (bech32) format  
+    - **is_whitelisted**: Whether the user is currently active/whitelisted
+    - **time_remaining**: UTC timestamp when subscription expires (only shown if user is NOT whitelisted)
+    
+    ### Use Cases:
+    - Check if a pubkey has an active NIP-05 identity
+    - Monitor subscription status
+    - Verify identity before performing actions
+    """,
+    responses={
+        200: {
+            "description": "User information retrieved successfully",
+            "model": UserInfoResponse
+        },
+        400: {
+            "description": "Invalid npub or pubkey format",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "Invalid npub/pubkey format"
+                    }
+                }
+            }
+        },
+        404: {
+            "description": "User not found",
+            "model": ErrorResponse,
+            "content": {
+                "application/json": {
+                    "example": {
+                        "detail": "User not found"
+                    }
+                }
+            }
+        }
+    }
+)
+async def get_user_info(
+    request: UserInfoRequest,
+    db: Session = Depends(get_db)
+):
+    """Get user information by npub or pubkey"""
+    
+    try:
+        # Try to determine if input is npub or hex pubkey
+        input_value = request.npub.strip()
+        
+        if input_value.startswith('npub1'):
+            # Input is npub format
+            if not validate_npub(input_value):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid npub format"
+                )
+            pubkey_hex = npub_to_pubkey(input_value)
+            npub_value = input_value
+        elif len(input_value) == 64:
+            # Input is likely hex pubkey
+            try:
+                # Validate it's a valid hex string
+                int(input_value, 16)
+                pubkey_hex = input_value.lower()
+                npub_value = pubkey_to_npub(pubkey_hex)
+            except ValueError:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid pubkey format"
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid input format. Must be npub or 64-character hex pubkey"
+            )
+        
+        # Find user by pubkey
+        user = db.query(User).filter(User.pubkey == pubkey_hex).first()
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+        
+        # Prepare response
+        response_data = {
+            "pubkey": pubkey_hex,
+            "npub": npub_value,
+            "is_whitelisted": user.is_active
+        }
+        
+        # Only include time_remaining if user is NOT whitelisted
+        if not user.is_active and user.expires_at:
+            # Convert to UTC timestamp
+            response_data["time_remaining"] = int(user.expires_at.timestamp())
+        
+        return UserInfoResponse(**response_data)
+        
+    except HTTPException:
+        raise
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid input: {str(e)}"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to get user info: {str(e)}"
         ) 
         

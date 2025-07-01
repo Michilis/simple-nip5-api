@@ -1,0 +1,50 @@
+{
+  "users": [
+    {
+      "pubkey": "npub1p6xyr6u5vet33r4x724vxmp9uwfllax5zjdgxeujyrtxt90lp74qvah0rm",
+      "username": "alice",
+      "active": true,
+      "note": "Founder - lifetime access"
+    },
+    {
+      "pubkey": "0e8c41eb946657188ea6f2aac36c25e393fff4d4149a83679220d66595ff0faa",
+      "username": "bob",
+      "active": true,
+      "note": "Core developer"
+    },
+    {
+      "pubkey": "npub1abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890",
+      "username": "charlie",
+      "active": false,
+      "note": "Reserved for future use - not yet active"
+    },
+    {
+      "pubkey": "def456ghi789jkl012mno345pqr678stu901vwx234yzab567cdef890abc123",
+      "username": "diana",
+      "active": true,
+      "note": "Community manager"
+    },
+    {
+      "pubkey": "npub1xyz789abc123def456ghi789jkl012mno345pqr678stu901vwx234yzab567",
+      "username": "eve",
+      "active": false,
+      "note": "Temporarily suspended pending review"
+    },
+    {
+      "pubkey": "123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef01",
+      "username": "frank",
+      "active": true
+    },
+    {
+      "pubkey": "npub1test123example456demo789sample012placeholder345testing678dummy901",
+      "username": "grace",
+      "active": true,
+      "note": "Beta tester - early access"
+    }
+  ],
+  "metadata": {
+    "version": "1.0",
+    "last_updated": "2024-01-15T10:30:00Z",
+    "description": "Manual whitelist for NIP-05 identity management"
+  }
+} 

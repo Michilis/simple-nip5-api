@@ -48,6 +48,14 @@ def migrate_subscription_columns():
             if 'subscription_type' not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN subscription_type VARCHAR;"))
                 print("Added subscription_type column to users table")
+                
+            if 'note' not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN note VARCHAR;"))
+                print("Added note column to users table")
+                
+            if 'username_manual' not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN username_manual BOOLEAN DEFAULT FALSE;"))
+                print("Added username_manual column to users table")
             
             # Check if columns exist in invoices table
             result = conn.execute(text("SELECT * FROM invoices LIMIT 1"))
